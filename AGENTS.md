@@ -55,7 +55,7 @@
 - `internal/app/`: core app, whatsmeow event handling, backfill, sync idle logic.
 - `internal/store/`: SQLite schema, migrations, FTS5 search, chats/contacts/groups/messages/media queries.
 - `internal/wa/`: whatsmeow client wrapper, JID resolution, message parsing (text, business, media, context).
-- `internal/config/`: store-dir resolution (`WACLI_STORE_DIR` env → XDG state dir on Linux → `~/.alive-reader`). The default is deliberately not upstream's `~/.wacli` and does not name WhatsApp; keep it that way when merging.
+- `internal/config/`: store-dir resolution (`WACLI_STORE_DIR` env → XDG state dir on Linux → `~/.alive-wapp`). The default is deliberately not upstream's `~/.wacli`, the path a scan of well-known locations looks at; keep it that way when merging.
 - `internal/lock/`: platform-specific LOCK-file locking; acquired before all write commands.
 - `internal/out/`: JSON + table output helpers; all human text goes through here.
 - `internal/fsutil/`: enforces 0700/0600 owner-only permissions on store files.
@@ -69,7 +69,7 @@
 - **FTS5 table** is a separate trigger-synced table in `wacli.db`; requires `-tags sqlite_fts5` at build time.
 - **Store lock**: a `LOCK` file in the store dir is acquired before any write operation; `--lock-wait` controls the wait timeout.
 - **Read-only mode**: `--read-only` flag or `WACLI_READONLY=1` env; commands that write the local store exit immediately with a clear error. This is on top of the read-only build, which holds without the flag.
-- **Store path precedence**: `--store` flag → `WACLI_STORE_DIR` env → XDG `~/.local/state/alive-reader` on Linux → `~/.alive-reader` elsewhere. Upstream's `~/.wacli` is never read.
+- **Store path precedence**: `--store` flag → `WACLI_STORE_DIR` env → XDG `~/.local/state/alive-wapp` on Linux → `~/.alive-wapp` elsewhere. Upstream's `~/.wacli` is never read.
 
 ## Build, Test, and Development Commands
 - Build: `pnpm build` — compiles with `-tags sqlite_fts5` and `CGO_CFLAGS=-Wno-error=missing-braces` (required for GCC 15+).

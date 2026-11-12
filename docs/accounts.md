@@ -22,7 +22,7 @@ wacli --account work chats list
 
 ## Config
 
-The default config path is `<base>/config.yaml`, where `<base>` is the default store root (`~/.alive-reader` on macOS and Windows, `~/.local/state/alive-reader` on Linux).
+The default config path is `<base>/config.yaml`, where `<base>` is the default store root (`~/.alive-wapp` on macOS and Windows, `~/.local/state/alive-wapp` on Linux).
 
 ```yaml
 default_account: personal
@@ -44,7 +44,7 @@ Store selection is intentionally explicit:
 2. `--account NAME` resolves `NAME` from `config.yaml`.
 3. `WACLI_STORE_DIR` keeps its existing override behavior for scripts and one-off stores.
 4. If `default_account` is set, commands use that account.
-5. Otherwise existing single-store behavior remains: XDG state dir on Linux, or `~/.alive-reader` elsewhere.
+5. Otherwise existing single-store behavior remains: XDG state dir on Linux, or `~/.alive-wapp` elsewhere.
 
 Account names may contain letters, digits, `.`, `_`, and `-`, and must start with a letter or digit.
 

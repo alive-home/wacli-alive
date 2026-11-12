@@ -12,9 +12,9 @@ Use this for `wacli` repo work and local WhatsApp linked-device stores. This is 
 - Repo: this checkout
 - CLI in repo: `./dist/wacli` after `pnpm build`
 - Installed CLI: `wacli`
-- Default config: `~/.alive-reader/config.yaml`
-- Default macOS store: `~/.alive-reader`
-- Named account stores: `~/.alive-reader/accounts/<name>`
+- Default config: `~/.alive-wapp/config.yaml`
+- Default macOS store: `~/.alive-wapp`
+- Named account stores: `~/.alive-wapp/accounts/<name>`
 - App DB: `<store>/wacli.db`
 - WhatsApp session DB: `<store>/session.db`
 
@@ -57,8 +57,8 @@ wacli --account me chats list --read-only --json
 For DB health or aggregate checks, use SQLite read-only where possible:
 
 ```bash
-sqlite3 "$HOME/.alive-reader/accounts/me/wacli.db" "pragma integrity_check;"
-sqlite3 "$HOME/.alive-reader/accounts/me/wacli.db" \
+sqlite3 "$HOME/.alive-wapp/accounts/me/wacli.db" "pragma integrity_check;"
+sqlite3 "$HOME/.alive-wapp/accounts/me/wacli.db" \
   "select count(*) from messages;
    select count(*) from messages_fts;"
 ```

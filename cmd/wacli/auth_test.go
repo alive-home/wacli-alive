@@ -400,7 +400,7 @@ func TestValidateAuthOptionsOpen(t *testing.T) {
 
 func TestPairPageStoreFlag(t *testing.T) {
 	t.Setenv(config.EnvStoreDir, "")
-	if got := pairPageStoreFlag(&rootFlags{}, "/home/anna/.alive-reader"); got != "" {
+	if got := pairPageStoreFlag(&rootFlags{}, "/home/anna/.alive-wapp"); got != "" {
 		t.Fatalf("default store: flag = %q, want none", got)
 	}
 	want := `--store "/data/wa"`

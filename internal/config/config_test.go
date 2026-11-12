@@ -41,10 +41,10 @@ func TestDefaultStoreDirFor(t *testing.T) {
 	for _, tc := range []struct {
 		name, goos, home, xdg, want string
 	}{
-		{"uses XDG_STATE_HOME on linux", "linux", "/home/alice", "/state", filepath.Join("/state", "alive-reader")},
-		{"uses XDG default on linux", "linux", "/home/alice", "", filepath.Join("/home/alice", ".local", "state", "alive-reader")},
-		{"ignores relative XDG_STATE_HOME on linux", "linux", "/home/alice", "state", filepath.Join("/home/alice", ".local", "state", "alive-reader")},
-		{"uses a home dotdir outside linux", "darwin", "/Users/alice", "/state", filepath.Join("/Users/alice", ".alive-reader")},
+		{"uses XDG_STATE_HOME on linux", "linux", "/home/alice", "/state", filepath.Join("/state", "alive-wapp")},
+		{"uses XDG default on linux", "linux", "/home/alice", "", filepath.Join("/home/alice", ".local", "state", "alive-wapp")},
+		{"ignores relative XDG_STATE_HOME on linux", "linux", "/home/alice", "state", filepath.Join("/home/alice", ".local", "state", "alive-wapp")},
+		{"uses a home dotdir outside linux", "darwin", "/Users/alice", "/state", filepath.Join("/Users/alice", ".alive-wapp")},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := defaultStoreDirFor(tc.goos, tc.home, tc.xdg); got != tc.want {

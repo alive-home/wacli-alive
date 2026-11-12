@@ -170,7 +170,7 @@ func TestPageLoadsNothingFromTheNetwork(t *testing.T) {
 		t.Fatal(err)
 	}
 	for lang := range texts {
-		html, err := renderHTML(view{State: stateScan, QR: path, QRSize: size}, lang, "/Users/anna/.alive-reader", "")
+		html, err := renderHTML(view{State: stateScan, QR: path, QRSize: size}, lang, "/Users/anna/.alive-wapp", "")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -283,8 +283,8 @@ func TestQRPathDrawsEveryDarkModule(t *testing.T) {
 }
 
 func TestPromptPointsAtTheStore(t *testing.T) {
-	plain := Prompt("en", "/Users/anna/.alive-reader", "")
-	if !strings.Contains(plain, "- wacli chats list: ") || !strings.Contains(plain, "/Users/anna/.alive-reader") || !strings.Contains(plain, `messages search "text"`) {
+	plain := Prompt("en", "/Users/anna/.alive-wapp", "")
+	if !strings.Contains(plain, "- wacli chats list: ") || !strings.Contains(plain, "/Users/anna/.alive-wapp") || !strings.Contains(plain, `messages search "text"`) {
 		t.Fatalf("prompt = %s", plain)
 	}
 	elsewhere := Prompt("nl", "/data/wa", `--store "/data/wa"`)
@@ -306,7 +306,7 @@ func TestWriteSamples(t *testing.T) {
 	if root == "" {
 		t.Skip("set WACLI_PAIRPAGE_SAMPLES to a directory to write the sample pages")
 	}
-	store := "/Users/anna/.alive-reader"
+	store := "/Users/anna/.alive-wapp"
 	if runtime.GOOS == "windows" {
 		store = `C:\Users\Annemarie van der Berg\AppData\Local\wacli`
 	}

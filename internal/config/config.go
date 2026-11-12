@@ -42,15 +42,15 @@ type Account struct {
 	Default         bool
 }
 
-// storeDirName names the default store directory. It says nothing about
-// WhatsApp and is not upstream's ~/.wacli, so something that walks a list of
-// well-known paths does not find the messages there. A store upstream wacli
-// left in ~/.wacli is not picked up either.
-const storeDirName = "alive-reader"
+// storeDirName names the default store directory. It is not upstream's
+// ~/.wacli, so something that walks a list of well-known paths does not find
+// the messages there. A store upstream wacli left in ~/.wacli is not picked
+// up either.
+const storeDirName = "alive-wapp"
 
 // DefaultStoreDir returns the store directory to use when --store is not
 // supplied. It checks WACLI_STORE_DIR first, then falls back to the XDG state
-// directory on Linux or ~/.alive-reader on other platforms.
+// directory on Linux or ~/.alive-wapp on other platforms.
 func DefaultStoreDir() string {
 	if dir := os.Getenv(EnvStoreDir); dir != "" {
 		return dir
