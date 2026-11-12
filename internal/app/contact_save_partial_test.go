@@ -97,12 +97,12 @@ func encodeContactPatch(t *testing.T, proc *appstate.Processor, keyID []byte, fr
 // whatsmeow's DecodePatches stores each patch's version as it decodes a
 // batch, and applyAppStatePatches applies the batch's names only once the
 // whole batch decoded. When the 409 or post-send batch of a send fails on a
-// later patch (a hash mismatch, a key not delivered yet), the cursor is past
+// later patch (a MAC mismatch, a key not delivered yet), the cursor is past
 // an authentic patch whose names were never applied or journaled, and no
 // incremental fetch will return it again. The failed save must keep its
 // recovery intent. (Round-4 review, codex-astra and codex-sol.)
 func TestSaveContactFailedSendAfterPartialDecodeKeepsDebt(t *testing.T) {
-	for _, failure := range []string{"later hash mismatch", "later key missing"} {
+	for _, failure := range []string{"later MAC mismatch", "later key missing"} {
 		t.Run(failure, func(t *testing.T) {
 			a, f := newContactSaveTestApp(t)
 			f.hasLocalAppState = true
@@ -119,7 +119,9 @@ func TestSaveContactFailedSendAfterPartialDecodeKeepsDebt(t *testing.T) {
 			bad := proto.Clone(first).(*waServerSync.SyncdPatch)
 			bad.Version = &waServerSync.SyncdVersion{Version: proto.Uint64(12)}
 			bad.SnapshotMAC = bytes.Repeat([]byte{0xff}, 32)
-			wantErr := appstate.ErrMismatchingLTHash
+			// The changed version and snapshot MAC leave the patch MAC wrong.
+			// A wrong LTHash alone no longer fails a patch whose MAC is valid.
+			wantErr := appstate.ErrMismatchingPatchMAC
 			if failure == "later key missing" {
 				bad.KeyID = &waServerSync.KeyId{ID: []byte{99, 99, 99, 99}}
 				wantErr = appstate.ErrKeyNotFound

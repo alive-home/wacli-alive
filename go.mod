@@ -11,7 +11,7 @@ require (
 	github.com/mdp/qrterminal/v3 v3.2.1
 	github.com/spf13/cobra v1.10.2
 	go.mau.fi/libsignal v0.2.2
-	go.mau.fi/whatsmeow v0.0.0-20261102152715-54038813c47f
+	go.mau.fi/whatsmeow v0.0.0-20261110152934-c88388f983b4
 	golang.org/x/crypto v0.58.0
 	golang.org/x/net v0.62.0
 	golang.org/x/sys v0.49.0

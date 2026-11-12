@@ -9,6 +9,7 @@ This is the changelog of upstream openclaw/wacli, kept for reference. Entries ab
 - Never marks messages as read, shows typing, or announces the device as online.
 - No telemetry, update checks, CI, or release publishing.
 - Default store is `~/.alive-wapp` (`~/.local/state/alive-wapp` on Linux) instead of upstream's `~/.wacli`, which is no longer read. Move an existing store there by hand, with no `wacli` running.
+- whatsmeow is ahead of upstream 0.26.0 (2026-11-10): a contact, mute, pin or archive update whose checksum does not match but whose signature is valid is applied instead of stopping that sync, and a contact removed on the phone loses its name here too.
 
 ## Unreleased
 
