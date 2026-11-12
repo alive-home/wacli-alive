@@ -8,6 +8,7 @@ This is the changelog of upstream openclaw/wacli, kept for reference. Entries ab
 - Cannot send messages or change anything on WhatsApp: those commands are not available, a running `sync --follow` only answers `media download` and `contacts check` for other processes, and every WhatsApp call passes a guard that refuses sends and changes.
 - Never marks messages as read, shows typing, or announces the device as online.
 - No telemetry, update checks, CI, or release publishing.
+- Default store is `~/.alive-reader` (`~/.local/state/alive-reader` on Linux) instead of upstream's `~/.wacli`, which is no longer read. Move an existing store there by hand, with no `wacli` running.
 
 ## Unreleased
 

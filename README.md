@@ -107,7 +107,7 @@ Run `wacli help <command>` for the full reference of the installed binary.
 
 ## Configuration
 
-The default store is `~/.local/state/wacli` on Linux and `~/.wacli` elsewhere. Override it with `--store DIR` or `WACLI_STORE_DIR`. Use named accounts when each WhatsApp number needs its own session, database, and lock.
+The default store is `~/.local/state/alive-reader` on Linux and `~/.alive-reader` elsewhere. It is not upstream's `~/.wacli`: a store left there is not read. Override it with `--store DIR` or `WACLI_STORE_DIR`. Use named accounts when each WhatsApp number needs its own session, database, and lock.
 
 ```sh
 wacli accounts add work

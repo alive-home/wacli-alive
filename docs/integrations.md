@@ -38,8 +38,8 @@ Without `--connect`, `doctor` reports local state, not the daemon's live connect
 
 The default store is:
 
-- Linux: `~/.local/state/wacli`, with legacy `~/.wacli` reused when present.
-- macOS and other platforms: `~/.wacli`.
+- Linux: `~/.local/state/alive-reader`.
+- macOS and other platforms: `~/.alive-reader`.
 
 Override with `--store DIR` or `WACLI_STORE_DIR`. Named accounts live in `config.yaml` and resolve with `--account NAME`; each account points at a normal isolated store directory.
 
@@ -57,7 +57,7 @@ For multi-account tools, iterate configured accounts explicitly and annotate der
 Open the database in SQLite read-only mode:
 
 ```bash
-sqlite3 "file:$HOME/.wacli/wacli.db?mode=ro" \
+sqlite3 "file:$HOME/.alive-reader/wacli.db?mode=ro" \
   "SELECT chat_jid, msg_id, datetime(ts, 'unixepoch') AS at, display_text
    FROM messages
    WHERE deleted_at IS NULL
@@ -71,7 +71,7 @@ In Python:
 from pathlib import Path
 import sqlite3
 
-db = Path.home() / ".wacli" / "wacli.db"
+db = Path.home() / ".alive-reader" / "wacli.db"
 conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
 conn.row_factory = sqlite3.Row
 

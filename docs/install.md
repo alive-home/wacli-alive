@@ -74,7 +74,7 @@ Development and Docker builds select Go 1.27.3 for its compiler, runtime, cgo, a
 
 ## Storage
 
-- Default store directory: `~/.local/state/wacli` on Linux (XDG state dir), `~/.wacli` on macOS / Windows. Existing Linux `~/.wacli` directories keep working.
+- Default store directory: `~/.local/state/alive-reader` on Linux (XDG state dir), `~/.alive-reader` on macOS / Windows. A store upstream wacli left in `~/.wacli` is not read.
 - Override with `--store DIR` or `WACLI_STORE_DIR`.
 - The store contains `session.db` (whatsmeow keys), `wacli.db` (messages + FTS), `media/`, and a `LOCK` file. See [Spec](spec.md#storage-layout) for the layout.
 - Permissions are owner-only (`0700` on the directory, `0600` on files). Do not relax these: they protect your WhatsApp session keys.

@@ -6,8 +6,8 @@ Read when: you need the user-facing command map, global flags, store model, or l
 
 ## Store and output
 
-- Default store: `~/.local/state/wacli` on Linux, `~/.wacli` elsewhere.
-- Existing Linux `~/.wacli` stores are reused when no XDG store exists.
+- Default store: `~/.local/state/alive-reader` on Linux, `~/.alive-reader` elsewhere.
+- A store upstream wacli left in `~/.wacli` is not read.
 - Override the store with `--store DIR` or `WACLI_STORE_DIR`.
 - Human-readable tables are the default.
 - Use `--json` for scriptable output.

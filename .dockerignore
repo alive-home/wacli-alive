@@ -3,6 +3,7 @@
 .DS_Store
 .env
 .wacli/
+.alive-reader/
 *.db
 *.db-*
 *.sqlite

@@ -42,9 +42,15 @@ type Account struct {
 	Default         bool
 }
 
+// storeDirName names the default store directory. It says nothing about
+// WhatsApp and is not upstream's ~/.wacli, so something that walks a list of
+// well-known paths does not find the messages there. A store upstream wacli
+// left in ~/.wacli is not picked up either.
+const storeDirName = "alive-reader"
+
 // DefaultStoreDir returns the store directory to use when --store is not
 // supplied. It checks WACLI_STORE_DIR first, then falls back to the XDG state
-// directory on Linux or ~/.wacli on other platforms.
+// directory on Linux or ~/.alive-reader on other platforms.
 func DefaultStoreDir() string {
 	if dir := os.Getenv(EnvStoreDir); dir != "" {
 		return dir
@@ -60,11 +66,11 @@ func DefaultBaseDir() string {
 	home, err := os.UserHomeDir()
 	if err != nil || home == "" {
 		if runtime.GOOS == "linux" && xdgStateHome != "" && filepath.IsAbs(xdgStateHome) {
-			return filepath.Join(xdgStateHome, "wacli")
+			return filepath.Join(xdgStateHome, storeDirName)
 		}
-		return ".wacli"
+		return "." + storeDirName
 	}
-	return defaultStoreDirFor(runtime.GOOS, home, xdgStateHome, pathExists)
+	return defaultStoreDirFor(runtime.GOOS, home, xdgStateHome)
 }
 
 func DefaultConfigPath() string {
@@ -239,22 +245,12 @@ func resolveConfiguredStore(baseDir, store string) string {
 	return filepath.Clean(filepath.Join(baseDir, store))
 }
 
-func defaultStoreDirFor(goos, home, xdgStateHome string, exists func(string) bool) string {
-	legacy := filepath.Join(home, ".wacli")
+func defaultStoreDirFor(goos, home, xdgStateHome string) string {
 	if goos != "linux" {
-		return legacy
+		return filepath.Join(home, "."+storeDirName)
 	}
 	if xdgStateHome != "" && filepath.IsAbs(xdgStateHome) {
-		return filepath.Join(xdgStateHome, "wacli")
+		return filepath.Join(xdgStateHome, storeDirName)
 	}
-	xdgDefault := filepath.Join(home, ".local", "state", "wacli")
-	if exists(legacy) && !exists(xdgDefault) {
-		return legacy
-	}
-	return xdgDefault
-}
-
-func pathExists(path string) bool {
-	_, err := os.Stat(path)
-	return err == nil
+	return filepath.Join(home, ".local", "state", storeDirName)
 }

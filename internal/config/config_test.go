@@ -24,7 +24,7 @@ func TestDefaultStoreDir(t *testing.T) {
 		t.Setenv("XDG_STATE_HOME", "")
 		got := DefaultStoreDir()
 		home, _ := os.UserHomeDir()
-		want := defaultStoreDirFor(runtime.GOOS, home, "", pathExists)
+		want := defaultStoreDirFor(runtime.GOOS, home, "")
 		if got != want {
 			t.Errorf("DefaultStoreDir() = %q, want %q", got, want)
 		}
@@ -38,55 +38,32 @@ func TestDefaultStoreDir(t *testing.T) {
 }
 
 func TestDefaultStoreDirFor(t *testing.T) {
-	t.Run("uses XDG_STATE_HOME on linux", func(t *testing.T) {
-		got := defaultStoreDirFor("linux", "/home/alice", "/state", func(string) bool { return false })
-		want := filepath.Join("/state", "wacli")
-		if got != want {
-			t.Fatalf("defaultStoreDirFor = %q, want %q", got, want)
-		}
-	})
-
-	t.Run("uses XDG default on linux", func(t *testing.T) {
-		got := defaultStoreDirFor("linux", "/home/alice", "", func(string) bool { return false })
-		want := filepath.Join("/home/alice", ".local", "state", "wacli")
-		if got != want {
-			t.Fatalf("defaultStoreDirFor = %q, want %q", got, want)
-		}
-	})
-
-	t.Run("ignores relative XDG_STATE_HOME on linux", func(t *testing.T) {
-		got := defaultStoreDirFor("linux", "/home/alice", "state", func(string) bool { return false })
-		want := filepath.Join("/home/alice", ".local", "state", "wacli")
-		if got != want {
-			t.Fatalf("defaultStoreDirFor = %q, want %q", got, want)
-		}
-	})
-
-	t.Run("keeps existing legacy linux store", func(t *testing.T) {
-		got := defaultStoreDirFor("linux", "/home/alice", "", func(path string) bool {
-			return path == filepath.Join("/home/alice", ".wacli")
+	for _, tc := range []struct {
+		name, goos, home, xdg, want string
+	}{
+		{"uses XDG_STATE_HOME on linux", "linux", "/home/alice", "/state", filepath.Join("/state", "alive-reader")},
+		{"uses XDG default on linux", "linux", "/home/alice", "", filepath.Join("/home/alice", ".local", "state", "alive-reader")},
+		{"ignores relative XDG_STATE_HOME on linux", "linux", "/home/alice", "state", filepath.Join("/home/alice", ".local", "state", "alive-reader")},
+		{"uses a home dotdir outside linux", "darwin", "/Users/alice", "/state", filepath.Join("/Users/alice", ".alive-reader")},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := defaultStoreDirFor(tc.goos, tc.home, tc.xdg); got != tc.want {
+				t.Fatalf("defaultStoreDirFor = %q, want %q", got, tc.want)
+			}
 		})
-		want := filepath.Join("/home/alice", ".wacli")
-		if got != want {
-			t.Fatalf("defaultStoreDirFor = %q, want %q", got, want)
-		}
-	})
+	}
+}
 
-	t.Run("uses XDG when both linux stores exist", func(t *testing.T) {
-		got := defaultStoreDirFor("linux", "/home/alice", "", func(string) bool { return true })
-		want := filepath.Join("/home/alice", ".local", "state", "wacli")
-		if got != want {
-			t.Fatalf("defaultStoreDirFor = %q, want %q", got, want)
+// The default store must not sit where upstream wacli keeps its own: that
+// path is the one a scan of well-known locations looks at.
+func TestDefaultStoreDirIsNotUpstreams(t *testing.T) {
+	for _, goos := range []string{"linux", "darwin", "windows"} {
+		for _, xdg := range []string{"", "/state"} {
+			if got := defaultStoreDirFor(goos, "/home/alice", xdg); strings.Contains(strings.ToLower(got), "wacli") {
+				t.Fatalf("default store on %s is %q, which names wacli", goos, got)
+			}
 		}
-	})
-
-	t.Run("keeps home dotdir outside linux", func(t *testing.T) {
-		got := defaultStoreDirFor("darwin", "/Users/alice", "/state", func(string) bool { return false })
-		want := filepath.Join("/Users/alice", ".wacli")
-		if got != want {
-			t.Fatalf("defaultStoreDirFor = %q, want %q", got, want)
-		}
-	})
+	}
 }
 
 func TestAccountsConfigRoundTrip(t *testing.T) {
