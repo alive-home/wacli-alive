@@ -60,6 +60,7 @@
 - `internal/out/`: JSON + table output helpers; all human text goes through here.
 - `internal/fsutil/`: enforces 0700/0600 owner-only permissions on store files.
 - `internal/pathutil/`: sanitises StorePath; rejects `?` and `#` to prevent URI injection.
+- `internal/pairpage/`: the local pairing page of `wacli auth --open` (`pair.html` + `pair.js` in the store directory). It is read from disk and must load nothing from the network; `TestPageLoadsNothingFromTheNetwork` holds that. What it tells customers must stay true of the build.
 - `internal/sqliteutil/`: sqlite file helpers.
 - Tests sit next to the code they cover (`*_test.go`).
 

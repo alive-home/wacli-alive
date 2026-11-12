@@ -10,6 +10,9 @@ import (
 	"testing"
 
 	appPkg "github.com/openclaw/wacli/internal/app"
+	"github.com/openclaw/wacli/internal/config"
+	"github.com/openclaw/wacli/internal/out"
+	"github.com/openclaw/wacli/internal/pairpage"
 )
 
 func TestAuthStatusPayloadIncludesLinkedJID(t *testing.T) {
@@ -373,5 +376,90 @@ func TestPhoneFromLinkedJID(t *testing.T) {
 	}
 	if got := phoneFromLinkedJID("not-a-jid"); got != "" {
 		t.Fatalf("phoneFromLinkedJID invalid = %q", got)
+	}
+}
+
+func TestValidateAuthOptionsOpen(t *testing.T) {
+	if _, err := validateAuthOptions(&rootFlags{}, authOptions{openPage: true}); err != nil {
+		t.Fatalf("--open alone: %v", err)
+	}
+	for _, opts := range []authOptions{
+		{openPage: true, phone: "+15551234567"},
+		{openPage: true, qrFormat: "text"},
+	} {
+		if _, err := validateAuthOptions(&rootFlags{}, opts); err == nil || !strings.Contains(err.Error(), "--open") {
+			t.Fatalf("validateAuthOptions(%+v) = %v, want an error about --open", opts, err)
+		}
+	}
+}
+
+func TestPairPageStoreFlag(t *testing.T) {
+	t.Setenv(config.EnvStoreDir, "")
+	if got := pairPageStoreFlag(&rootFlags{}, "/home/anna/.wacli"); got != "" {
+		t.Fatalf("default store: flag = %q, want none", got)
+	}
+	want := `--store "/data/wa"`
+	if got := pairPageStoreFlag(&rootFlags{storeDir: "/data/wa"}, "/data/wa"); got != want {
+		t.Fatalf("--store: flag = %q, want %q", got, want)
+	}
+	if got := pairPageStoreFlag(&rootFlags{account: "work"}, "/data/wa"); got != want {
+		t.Fatalf("--account: flag = %q, want %q", got, want)
+	}
+	t.Setenv(config.EnvStoreDir, "/data/wa")
+	if got := pairPageStoreFlag(&rootFlags{}, "/data/wa"); got != want {
+		t.Fatalf("env store: flag = %q, want %q", got, want)
+	}
+}
+
+func TestPairPageQRWriter(t *testing.T) {
+	dir := t.TempDir()
+	page := pairpage.New(dir, "")
+	if err := page.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer page.Finish(0, nil)
+
+	var stderr bytes.Buffer
+	pairPageQRWriter(page, &stderr, out.NewEventWriter(&stderr, true))("2@test-code")
+	if !strings.Contains(stderr.String(), `"event":"qr_code"`) || strings.Contains(stderr.String(), "warning") {
+		t.Fatalf("stderr = %q", stderr.String())
+	}
+	html, err := os.ReadFile(page.Path())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(html), `<body data-state="scan">`) {
+		t.Fatal("the page does not show the code")
+	}
+}
+
+// The prompt on the pairing page teaches an assistant commands; each one must
+// exist in this build, flags included.
+func TestPairPagePromptCommandsExist(t *testing.T) {
+	root := newRootCmd(&rootFlags{})
+	lines := []string{"auth --open"}
+	for _, c := range pairpage.PromptCommands {
+		lines = append(lines, c.Command)
+	}
+	for _, line := range lines {
+		words := strings.Fields(line)
+		if problem := unavailableCommand(root, words); problem != "" {
+			t.Errorf("%s: %s", line, problem)
+			continue
+		}
+		cmd, _, err := root.Find(words)
+		if err != nil {
+			t.Errorf("%s: %v", line, err)
+			continue
+		}
+		for _, word := range words {
+			name := strings.TrimLeft(word, "-")
+			if !strings.HasPrefix(word, "--") || name == "help" {
+				continue
+			}
+			if cmd.Flags().Lookup(name) == nil && cmd.InheritedFlags().Lookup(name) == nil {
+				t.Errorf("%s: %s has no flag %s", line, cmd.CommandPath(), word)
+			}
+		}
 	}
 }

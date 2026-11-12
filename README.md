@@ -52,10 +52,10 @@ See the [installation guide](docs/install.md) for platform notes and Docker.
 
 ## Quick start
 
-Pair by scanning the terminal QR code from WhatsApp's **Linked devices** screen. `auth` runs the first sync after pairing.
+Pair by scanning the QR code from WhatsApp's **Linked devices** screen. `wacli auth` prints it in the terminal; `wacli auth --open` shows it on a local page in your browser, with the steps and a plain explanation of what the link can read. `auth` runs the first sync after pairing.
 
 ```sh
-wacli auth
+wacli auth --open
 wacli sync --follow
 wacli messages search "meeting"
 ```

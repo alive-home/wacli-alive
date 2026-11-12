@@ -1,0 +1,263 @@
+<!doctype html>
+<html lang="en" data-lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline' 'self' file:">
+<title>Link WhatsApp - Alive</title>
+{{if .Live}}<noscript><meta http-equiv="refresh" content="3"></noscript>{{end}}
+<style>
+:root {
+  --screen: #efeff1; --raised: #ffffff;
+  --text: #1b1b1e; --text-2: rgba(27,27,30,.72); --text-3: rgba(27,27,30,.64); --muted: rgba(27,27,30,.54);
+  --fill: rgba(27,27,30,.04);
+  --accent: rgb(0,192,96);
+  --shadow: 0 1px 2px 0 rgba(0,0,0,.05);
+  --ring: #1b1b1e;
+  --sans: "Diatype Variable", "Inter", system-ui, -apple-system, "Segoe UI", Arial, sans-serif;
+  --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --inset: 48px;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --screen: rgb(12,12,14); --raised: rgb(31,31,34);
+    --text: #ffffff; --text-2: rgba(255,255,255,.72); --text-3: rgba(255,255,255,.5); --muted: rgba(255,255,255,.38);
+    --fill: rgba(255,255,255,.06);
+    --shadow: none;
+    --ring: rgb(0,192,96);
+  }
+}
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body { margin: 0; background: var(--screen); color: var(--text); font: 15px/1.5 var(--sans); -webkit-font-smoothing: antialiased; }
+main { max-width: 912px; margin: 0 auto; padding: 28px 24px 72px; }
+h1, h2, p, ol, figure, pre { margin: 0; }
+:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+a { color: inherit; text-decoration: underline; text-decoration-color: var(--muted); text-underline-offset: 3px; display: inline-block; overflow-wrap: anywhere; }
+
+.brand { display: flex; align-items: center; gap: 8px; margin: 0 0 28px var(--inset); font-size: 17px; font-weight: 300; letter-spacing: -.02em; }
+.brand i { width: 10px; height: 10px; border-radius: 50%; background: var(--accent); }
+
+.card { background: var(--raised); box-shadow: var(--shadow); border-radius: 14px; padding: 44px var(--inset); }
+h1 { font: 500 28px/1.15 "Satoshi", var(--sans); letter-spacing: -.02em; }
+.lead { margin-top: 8px; max-width: 44ch; color: var(--text-2); }
+
+.scan, .linked, .stopped { display: none; }
+[data-state=starting] .scan, [data-state=scan] .scan {
+  display: grid; grid-template: "head code" auto "steps code" auto / minmax(0, 1fr) 264px; column-gap: 56px; row-gap: 28px;
+}
+.head { grid-area: head; }
+.steps { grid-area: steps; list-style: none; padding: 0; display: grid; gap: 14px; counter-reset: step; }
+.steps li { counter-increment: step; display: grid; grid-template-columns: 24px minmax(0, 1fr); gap: 12px; color: var(--text-2); }
+.steps li::before {
+  content: counter(step); width: 24px; height: 24px; border-radius: 50%; background: var(--fill);
+  display: grid; place-items: center; font-size: 12px; font-weight: 500; font-variant-numeric: tabular-nums;
+}
+.steps b { font-weight: 500; color: var(--text); }
+.code { grid-area: code; align-self: center; }
+.qr { width: 264px; max-width: 100%; aspect-ratio: 1; border-radius: 12px; background: #ffffff; overflow: hidden; display: grid; place-items: center; }
+.qr svg { display: block; width: 100%; height: 100%; }
+.qr path { fill: #1b1b1e; }
+.qr p { display: none; font-size: 13px; color: var(--text-3); }
+.code figcaption { margin-top: 12px; text-align: center; font-size: 13px; color: var(--text-3); }
+[data-state=starting] .qr { background: var(--fill); }
+[data-state=starting] .qr svg { display: none; }
+[data-state=starting] .qr p { display: block; }
+[data-state=starting] .code figcaption { visibility: hidden; }
+
+[data-state=syncing] .linked, [data-state=done] .linked, [data-state=halted] .linked, [data-state=stopped] .stopped { display: block; }
+.tick { display: block; width: 28px; height: 28px; margin-bottom: 16px; color: var(--accent); }
+.phone { margin-top: 8px; color: var(--text-2); font-variant-numeric: tabular-nums; }
+.phone:empty { display: none; }
+.now { display: none; margin-top: 20px; max-width: 64ch; color: var(--text-2); }
+[data-state=syncing] .now.syncing, [data-state=done] .now.done, [data-state=halted] .now.halted { display: block; }
+.stopped .lead { max-width: 56ch; }
+
+.facts { display: grid; grid-template-columns: 1fr 1fr; gap: 32px 56px; margin-top: 44px; padding: 0 var(--inset); }
+h2 { font-size: 15px; font-weight: 500; }
+.facts p { margin-top: 4px; color: var(--text-2); }
+code { display: block; width: fit-content; max-width: 100%; margin: 6px 0; font: 13px/1.4 var(--mono); background: var(--fill); border-radius: 7px; padding: 4px 8px; overflow-wrap: anywhere; }
+
+.assistant { margin-top: 44px; }
+.assistant header { display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; padding: 0 var(--inset); }
+.assistant header p { margin-top: 4px; color: var(--text-2); }
+.copy { display: flex; align-items: center; gap: 12px; }
+.copy p { font-size: 13px; color: var(--text-3); text-align: right; }
+button { flex: none; font: 500 13px/1 var(--sans); color: var(--screen); background: var(--text); border: 0; border-radius: 8px; padding: 10px 14px; cursor: pointer; transition: opacity .16s; }
+button:hover { opacity: .86; }
+.note { display: none; }
+[data-copy=done] .note.done, [data-copy=manual] .note.manual { display: block; }
+pre { margin-top: 16px; background: var(--raised); box-shadow: var(--shadow); border-radius: 14px; padding: 24px var(--inset); font: 13px/1.65 var(--mono); color: var(--text-2); white-space: pre-wrap; overflow-wrap: anywhere; }
+
+@media (max-width: 720px) {
+  :root { --inset: 24px; }
+  main { padding: 20px 16px 48px; }
+  .brand { margin-bottom: 20px; }
+  .card { padding: 28px var(--inset); }
+  h1 { font-size: 24px; }
+  [data-state=starting] .scan, [data-state=scan] .scan { grid-template: "head" auto "code" auto "steps" auto / minmax(0, 1fr); }
+  .code { justify-self: center; }
+  .facts { grid-template-columns: 1fr; gap: 24px; margin-top: 32px; }
+  .assistant { margin-top: 32px; }
+  .assistant header { flex-direction: column; align-items: flex-start; gap: 12px; }
+  .copy { flex-direction: row-reverse; }
+  .copy p { text-align: left; }
+}
+
+[data-lang=nl] [lang=en], [data-lang=en] [lang=nl] { display: none !important; }
+</style>
+</head>
+<body data-state="{{.View.State}}">
+<main>
+  <p class="brand"><i></i>alive</p>
+
+  <div class="card">
+    <div class="scan">
+      <div class="head">
+        <h1><span lang="nl">Koppel je WhatsApp</span><span lang="en">Link your WhatsApp</span></h1>
+        <p class="lead" lang="nl">Scan de code met je telefoon. Daarna kan deze computer je berichten lezen, niet versturen.</p>
+        <p class="lead" lang="en">Scan the code with your phone. After that this computer can read your messages, not send them.</p>
+      </div>
+      <ol class="steps">
+        <li><span lang="nl">Open <b>WhatsApp</b> op je telefoon.</span><span lang="en">Open <b>WhatsApp</b> on your phone.</span></li>
+        <li><span lang="nl">Tik op <b>Instellingen</b>. Op Android: tik op de <b>drie puntjes</b> rechtsboven.</span><span lang="en">Tap <b>Settings</b>. On Android: tap the <b>three dots</b> at the top right.</span></li>
+        <li><span lang="nl">Tik op <b>Gekoppelde apparaten</b> en dan op <b>Apparaat koppelen</b>.</span><span lang="en">Tap <b>Linked devices</b>, then <b>Link a device</b>.</span></li>
+        <li><span lang="nl">Richt je telefoon op de code op dit scherm.</span><span lang="en">Point your phone at the code on this screen.</span></li>
+      </ol>
+      <figure class="code">
+        <div class="qr">
+          <svg id="qr" viewBox="0 0 {{.View.QRSize}} {{.View.QRSize}}" shape-rendering="crispEdges" role="img" aria-label="QR code"><path d="{{.View.QR}}"/></svg>
+          <p lang="nl">Code wordt opgehaald…</p>
+          <p lang="en">Getting a code…</p>
+        </div>
+        <figcaption><span lang="nl">De code ververst vanzelf.</span><span lang="en">The code refreshes by itself.</span></figcaption>
+      </figure>
+    </div>
+
+    <div class="linked">
+      <svg class="tick" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="m16 9-5.5 5.5L8 12"/></svg>
+      <h1><span lang="nl">WhatsApp is gekoppeld</span><span lang="en">WhatsApp is linked</span></h1>
+      <p class="phone" id="phone">{{if .View.Phone}}+{{.View.Phone}}{{end}}</p>
+      <p class="now syncing" lang="nl">Je berichten worden nu naar deze computer gekopieerd. De eerste keer duurt dat een paar minuten.</p>
+      <p class="now syncing" lang="en">Your messages are being copied to this computer. The first time takes a few minutes.</p>
+      <p class="now done" lang="nl">Opgehaalde berichten: <span class="count">{{.View.Messages}}</span>. Je kunt dit venster sluiten.</p>
+      <p class="now done" lang="en">Messages fetched: <span class="count">{{.View.Messages}}</span>. You can close this window.</p>
+      <p class="now halted" lang="nl">Het ophalen van berichten is gestopt. Start het koppelen opnieuw om verder te gaan; scannen hoeft niet nog een keer.</p>
+      <p class="now halted" lang="en">Fetching messages stopped. Start linking again to continue; you do not need to scan again.</p>
+    </div>
+
+    <div class="stopped">
+      <h1><span lang="nl">Het koppelen is gestopt</span><span lang="en">Linking stopped</span></h1>
+      <p class="lead" lang="nl">Er komt geen nieuwe code meer op deze pagina. Start het koppelen opnieuw, op dezelfde manier als de vorige keer.</p>
+      <p class="lead" lang="en">This page gets no new code. Start linking again, the same way as before.</p>
+    </div>
+  </div>
+
+  <div class="facts">
+    <section>
+      <h2><span lang="nl">Wat kan het lezen?</span><span lang="en">What can it read?</span></h2>
+      <p lang="nl">Je chats, groepen, contacten, foto's en bestanden in WhatsApp. Het kan alleen lezen: berichten versturen, verwijderen of als gelezen markeren kan het niet.</p>
+      <p lang="en">Your chats, groups, contacts, photos and files in WhatsApp. It can only read: it cannot send or delete messages, or mark them as read.</p>
+    </section>
+    <section>
+      <h2><span lang="nl">Hoe werkt het?</span><span lang="en">How does it work?</span></h2>
+      <p lang="nl">Deze computer wordt een gekoppeld apparaat, net als bij WhatsApp op een computer, en kopieert daarna je berichten. Stoppen kan altijd: log dit apparaat uit in WhatsApp onder Gekoppelde apparaten.</p>
+      <p lang="en">This computer becomes a linked device, like WhatsApp on a computer, and then copies your messages. You can stop any time: log this device out in WhatsApp under Linked devices.</p>
+    </section>
+    <section>
+      <h2><span lang="nl">Waar staan je gegevens?</span><span lang="en">Where is your data?</span></h2>
+      <p lang="nl">In deze map op deze computer: <code>{{.StoreDir}}</code> Het programma stuurt ze uit zichzelf nergens heen. Een AI-assistent die je op deze computer laat werken, kan ze wel lezen.</p>
+      <p lang="en">In this folder on this computer: <code>{{.StoreDir}}</code> The program does not send it anywhere by itself. An AI assistant you let work on this computer can read it.</p>
+    </section>
+    <section>
+      <h2><span lang="nl">Kun je dat controleren?</span><span lang="en">Can you check that?</span></h2>
+      <p lang="nl">Ja. De code is open source, dus iedereen kan nalezen wat het programma doet: <a href="{{.Source}}" target="_blank" rel="noopener noreferrer">{{.SourceID}}</a>.</p>
+      <p lang="en">Yes. The code is open source, so anyone can read what the program does: <a href="{{.Source}}" target="_blank" rel="noopener noreferrer">{{.SourceID}}</a>.</p>
+    </section>
+  </div>
+
+  <section class="assistant">
+    <header>
+      <div>
+        <h2><span lang="nl">Voor je AI-assistent</span><span lang="en">For your AI assistant</span></h2>
+        <p lang="nl">Plak deze tekst in je assistent. Dan weet die hoe het werkt.</p>
+        <p lang="en">Paste this text into your assistant. Then it knows how this works.</p>
+      </div>
+      <div class="copy">
+        <div role="status">
+          <p class="note done" lang="nl">Gekopieerd</p>
+          <p class="note done" lang="en">Copied</p>
+          <p class="note manual" lang="nl">Tekst geselecteerd. Kopieer met Ctrl+C of ⌘C.</p>
+          <p class="note manual" lang="en">Text selected. Copy with Ctrl+C or ⌘C.</p>
+        </div>
+        <button type="button" id="copy"><span lang="nl">Kopieer tekst</span><span lang="en">Copy text</span></button>
+      </div>
+    </header>
+    <pre lang="nl">{{.PromptNL}}</pre>
+    <pre lang="en">{{.PromptEN}}</pre>
+  </section>
+</main>
+<script>
+(function () {
+  var root = document.documentElement, body = document.body;
+  var asked = /^#(nl|en)$/.exec(location.hash);
+  var lang = asked ? asked[1] : /^nl\b/i.test(navigator.language || '') ? 'nl' : 'en';
+  root.lang = lang;
+  root.setAttribute('data-lang', lang);
+  if (lang === 'nl') document.title = 'WhatsApp koppelen - Alive';
+
+  var live = { starting: 1, scan: 1, syncing: 1 };
+  var svg = document.getElementById('qr'), phone = document.getElementById('phone');
+  var cur;
+
+  function show(s) {
+    cur = s;
+    var state = s.state;
+    // A live page that stops hearing from the program says so.
+    if (live[state] && s.until && Date.now() > s.until) state = state === 'syncing' ? 'halted' : 'stopped';
+    body.setAttribute('data-state', state);
+    if (s.qr) {
+      svg.setAttribute('viewBox', '0 0 ' + s.qrSize + ' ' + s.qrSize);
+      svg.firstElementChild.setAttribute('d', s.qr);
+    }
+    phone.textContent = s.phone ? '+' + s.phone : '';
+    var counts = document.querySelectorAll('.count');
+    for (var i = 0; i < counts.length; i++) counts[i].textContent = (s.messages || 0).toLocaleString(lang);
+  }
+
+  window.pairState = function (s) { if (s.seq !== cur.seq) show(s); };
+  show({{.View}});
+
+  setInterval(function () {
+    show(cur);
+    if (!live[cur.state]) return;
+    var el = document.createElement('script');
+    el.src = '{{.Script}}?' + Date.now();
+    el.onload = function () { el.remove(); };
+    // A browser that will not load the script still follows along by reloading.
+    el.onerror = function () { location.reload(); };
+    document.head.appendChild(el);
+  }, 1500);
+
+  document.getElementById('copy').onclick = function () {
+    var pre = document.querySelector('pre[lang=' + lang + ']');
+    function done() {
+      body.setAttribute('data-copy', 'done');
+      setTimeout(function () { body.removeAttribute('data-copy'); }, 2500);
+    }
+    function manual() {
+      var range = document.createRange();
+      range.selectNodeContents(pre);
+      var sel = getSelection();
+      sel.removeAllRanges();
+      sel.addRange(range);
+      body.setAttribute('data-copy', 'manual');
+    }
+    if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(pre.textContent).then(done, manual);
+    else manual();
+  };
+})();
+</script>
+</body>
+</html>

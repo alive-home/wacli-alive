@@ -63,6 +63,7 @@ type SyncOptions struct {
 	OnQRCode            func(string)
 	PairPhoneNumber     string
 	OnPairCode          func(string)
+	OnConnected         func() // called once the device is connected, which for auth means paired
 	AfterConnect        func(context.Context) error
 	DownloadMedia       bool
 	RefreshContacts     bool
@@ -183,6 +184,9 @@ func (a *App) Sync(ctx context.Context, opts SyncOptions) (SyncResult, error) {
 	connectionEpoch.Store(nowUTC().UnixNano())
 	if err := a.connectForSync(syncCtx, opts); err != nil {
 		return SyncResult{}, err
+	}
+	if opts.OnConnected != nil {
+		opts.OnConnected()
 	}
 	// Ensure unavailable presence is sent on ALL post-connect exits
 	// (success, error, storage limit, reconnect failure), not just the

@@ -3765,3 +3765,42 @@ func TestSyncDoesNotRetryNonTransientAuthConnectFailure(t *testing.T) {
 		t.Fatalf("connect calls = %d, want 1", f.connectCalls)
 	}
 }
+
+// OnConnected is how `auth --open` learns pairing worked: it must fire once
+// the device is connected, before the refreshes, and never for a failed connect.
+func TestSyncOnConnectedFiresOnlyAfterConnect(t *testing.T) {
+	a := newTestApp(t)
+	f := newFakeWA()
+	a.wa = f
+
+	var order []string
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	_, err := a.Sync(ctx, SyncOptions{
+		Mode:        SyncModeOnce,
+		IdleExit:    time.Millisecond,
+		OnConnected: func() { order = append(order, "connected") },
+		AfterConnect: func(context.Context) error {
+			order = append(order, "after")
+			return nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("Sync: %v", err)
+	}
+	if strings.Join(order, ",") != "connected,after" {
+		t.Fatalf("order = %v, want connected then after", order)
+	}
+
+	a = newTestApp(t)
+	f = newFakeWA()
+	f.connectErrs = []error{errors.New("no route")}
+	a.wa = f
+	called := false
+	if _, err := a.Sync(ctx, SyncOptions{Mode: SyncModeOnce, IdleExit: time.Millisecond, OnConnected: func() { called = true }}); err == nil {
+		t.Fatal("Sync succeeded, want the connect error")
+	}
+	if called {
+		t.Fatal("OnConnected fired for a connect that failed")
+	}
+}

@@ -11,7 +11,9 @@ import (
 
 	"github.com/mdp/qrterminal/v3"
 	appPkg "github.com/openclaw/wacli/internal/app"
+	"github.com/openclaw/wacli/internal/config"
 	"github.com/openclaw/wacli/internal/out"
+	"github.com/openclaw/wacli/internal/pairpage"
 	"github.com/openclaw/wacli/internal/wa"
 	"github.com/spf13/cobra"
 	"go.mau.fi/whatsmeow/types"
@@ -22,6 +24,7 @@ type authOptions struct {
 	idleExit       time.Duration
 	downloadMedia  bool
 	qrFormat       string
+	openPage       bool
 	phone          string
 	historyDays    int
 	historyPerChat int
@@ -72,6 +75,7 @@ func addAuthFlags(cmd *cobra.Command, opts *authOptions) {
 	cmd.Flags().DurationVar(&opts.idleExit, "idle-exit", 30*time.Second, "exit after being idle (bootstrap/once modes)")
 	cmd.Flags().BoolVar(&opts.downloadMedia, "download-media", false, "download media in the background during sync")
 	cmd.Flags().StringVar(&opts.qrFormat, "qr-format", "terminal", "QR output format: terminal or text")
+	cmd.Flags().BoolVar(&opts.openPage, "open", false, "show the QR code on a page in the default browser instead of in the terminal")
 	cmd.Flags().StringVar(&opts.phone, "phone", "", "pair by phone number instead of QR code")
 	cmd.Flags().IntVar(&opts.historyDays, "history-days", 0, "days of history to ask the phone for while pairing (0 = no limit, what the phone decides)")
 	cmd.Flags().IntVar(&opts.historyPerChat, "history-max-per-chat", 0, "cap the messages each chat brings while pairing (0 = no cap)")
@@ -79,7 +83,7 @@ func addAuthFlags(cmd *cobra.Command, opts *authOptions) {
 	cmd.Flags().IntVar(&opts.historySizeMB, "history-size-mb", 0, "megabytes the phone may put into the full history sync (0 = what the phone decides; needs --full-history)")
 }
 
-func runAuth(flags *rootFlags, opts authOptions) (appPkg.SyncResult, error) {
+func runAuth(flags *rootFlags, opts authOptions) (res appPkg.SyncResult, err error) {
 	if err := flags.requireWritable(); err != nil {
 		return appPkg.SyncResult{}, err
 	}
@@ -112,6 +116,19 @@ func runAuth(flags *rootFlags, opts authOptions) (appPkg.SyncResult, error) {
 	} else {
 		fmt.Fprintln(os.Stderr, "Starting authentication…")
 	}
+	onQRCode := authQRWriter(validated.qrFormat, os.Stdout, os.Stderr, a.Events())
+	var onConnected func()
+	if opts.openPage {
+		page, pageErr := openPairPage(flags, a, os.Stderr)
+		if pageErr != nil {
+			return appPkg.SyncResult{}, pageErr
+		}
+		onQRCode = pairPageQRWriter(page, os.Stderr, a.Events())
+		onConnected = func() {
+			pairPageWarn(os.Stderr, page.Linked(phoneFromLinkedJID(a.WA().LinkedJID())))
+		}
+		defer func() { pairPageWarn(os.Stderr, page.Finish(res.MessagesStored, err)) }()
+	}
 	return a.Sync(ctx, appPkg.SyncOptions{
 		Mode:            mode,
 		AllowQR:         true,
@@ -120,7 +137,8 @@ func runAuth(flags *rootFlags, opts authOptions) (appPkg.SyncResult, error) {
 		RefreshGroups:   true,
 		RefreshChannels: true,
 		IdleExit:        opts.idleExit,
-		OnQRCode:        authQRWriter(validated.qrFormat, os.Stdout, os.Stderr, a.Events()),
+		OnQRCode:        onQRCode,
+		OnConnected:     onConnected,
 		PairPhoneNumber: validated.pairPhone,
 		OnPairCode:      authPairCodeWriter(validated.pairPhone, os.Stderr, a.Events()),
 		MaxMessages:     maxMessages,
@@ -140,6 +158,12 @@ func validateAuthOptions(flags *rootFlags, opts authOptions) (validatedAuthOptio
 	pairPhone, err := normalizePairPhone(opts.phone)
 	if err != nil {
 		return validatedAuthOptions{}, err
+	}
+	if opts.openPage && pairPhone != "" {
+		return validatedAuthOptions{}, fmt.Errorf("--open shows a QR code and cannot be combined with --phone")
+	}
+	if opts.openPage && qrFormat == "text" {
+		return validatedAuthOptions{}, fmt.Errorf("--open shows the QR code in the browser and cannot be combined with --qr-format=text")
 	}
 	historyLimits, err := normalizeHistoryLimits(opts)
 	if err != nil {
@@ -227,6 +251,50 @@ func authQRWriter(format string, stdout, stderr io.Writer, events *out.EventWrit
 		fmt.Fprintln(stderr, "\nScan this QR code with WhatsApp (Linked Devices):")
 		qrterminal.GenerateHalfBlock(code, qrterminal.M, stderr)
 		fmt.Fprintln(stderr)
+	}
+}
+
+// openPairPage writes the pairing page and shows it in the default browser.
+// A browser that cannot be opened is not fatal: the path is printed instead.
+func openPairPage(flags *rootFlags, a *appPkg.App, stderr io.Writer) (*pairpage.Page, error) {
+	page := pairpage.New(a.StoreDir(), pairPageStoreFlag(flags, a.StoreDir()))
+	if err := page.Start(); err != nil {
+		return nil, err
+	}
+	openErr := pairpage.Open(page.Path())
+	if a.Events().Enabled() {
+		_ = a.Events().Emit("pair_page", map[string]any{"path": page.Path(), "opened": openErr == nil})
+		return page, nil
+	}
+	if openErr != nil {
+		fmt.Fprintf(stderr, "Could not open a browser (%v). Open this file in a browser to pair:\n%s\n", openErr, page.Path())
+		return page, nil
+	}
+	fmt.Fprintf(stderr, "The pairing page is open in your browser: %s\n", page.Path())
+	return page, nil
+}
+
+// pairPageStoreFlag is what the commands in the page's prompt need to reach
+// this store. A bare `wacli` only finds it when nothing pointed auth elsewhere.
+func pairPageStoreFlag(flags *rootFlags, storeDir string) string {
+	if flags.storeDir == "" && strings.TrimSpace(flags.account) == "" && os.Getenv(config.EnvStoreDir) == "" {
+		return ""
+	}
+	return fmt.Sprintf("--store %q", storeDir)
+}
+
+func pairPageQRWriter(page *pairpage.Page, stderr io.Writer, events *out.EventWriter) func(string) {
+	return func(code string) {
+		if events.Enabled() {
+			_ = events.Emit("qr_code", map[string]any{"code": code})
+		}
+		pairPageWarn(stderr, page.ShowQR(code))
+	}
+}
+
+func pairPageWarn(stderr io.Writer, err error) {
+	if err != nil {
+		fmt.Fprintf(stderr, "warning: pairing page: %v\n", err)
 	}
 }
 

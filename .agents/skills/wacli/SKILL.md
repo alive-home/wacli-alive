@@ -86,6 +86,8 @@ select count(*) from messages_fts;
 
 `auth` pairs and then bootstraps sync. `sync` never shows QR and requires an authenticated store.
 
+When a person has to scan the code, run `wacli auth --open`: it shows the QR code on a local page in their default browser, with the steps and what the link can read, so they do not need the terminal. Keep the command running until it exits.
+
 Common commands:
 
 ```bash
