@@ -86,7 +86,7 @@ select count(*) from messages_fts;
 
 `auth` pairs and then bootstraps sync. `sync` never shows QR and requires an authenticated store.
 
-When a person has to scan the code, run `wacli auth --open`: it shows the QR code on a local page in their default browser, with the steps and what the link can read, so they do not need the terminal. Keep the command running until it exits.
+When a person has to scan the code, run `wacli auth --open`: it shows the QR code on a local page in their default browser, with the steps and what the link can read, so they do not need the terminal. Add `--lang nl` when the person reads Dutch; the page is in English otherwise. Keep the command running until it exits. It also works after the person logged this device out in WhatsApp: `auth` clears the dead session and shows a new code.
 
 Common commands:
 

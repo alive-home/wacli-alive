@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"runtime"
 	"strconv"
@@ -44,7 +45,7 @@ func wantState(t *testing.T, dir, state string) (html, js string) {
 
 func TestPageFollowsPairing(t *testing.T) {
 	dir := t.TempDir()
-	p := New(dir, "")
+	p := New(dir, "", English)
 	if err := p.Start(); err != nil {
 		t.Fatal(err)
 	}
@@ -80,7 +81,7 @@ func TestPageFollowsPairing(t *testing.T) {
 		t.Fatal(err)
 	}
 	html, js = wantState(t, dir, stateDone)
-	if !strings.Contains(html, `<span class="count">1284</span>`) || !strings.Contains(js, `"messages":1284`) {
+	if !strings.Contains(html, `<span id="count">1284</span>`) || !strings.Contains(js, `"messages":1284`) {
 		t.Fatal("the message count is not on the page")
 	}
 	if strings.Contains(js, `"until"`) || strings.Contains(html, `http-equiv="refresh"`) {
@@ -96,7 +97,7 @@ func TestPageFollowsPairing(t *testing.T) {
 
 func TestFinishSaysHowItEnded(t *testing.T) {
 	dir := t.TempDir()
-	p := New(dir, "")
+	p := New(dir, "", English)
 	if err := p.Start(); err != nil {
 		t.Fatal(err)
 	}
@@ -106,7 +107,7 @@ func TestFinishSaysHowItEnded(t *testing.T) {
 	wantState(t, dir, stateStopped)
 
 	dir = t.TempDir()
-	p = New(dir, "")
+	p = New(dir, "", English)
 	if err := p.Start(); err != nil {
 		t.Fatal(err)
 	}
@@ -124,7 +125,7 @@ func TestFinishSaysHowItEnded(t *testing.T) {
 
 func TestLivePageExpires(t *testing.T) {
 	dir := t.TempDir()
-	p := New(dir, "")
+	p := New(dir, "", English)
 	at := time.Date(2026, 11, 12, 15, 0, 0, 0, time.UTC)
 	p.now = func() time.Time { return at }
 	if err := p.set(func(v *view) { v.State = stateScan }); err != nil {
@@ -145,7 +146,7 @@ func TestPageFilesArePrivate(t *testing.T) {
 		t.Skip("no owner-only mode bits on Windows")
 	}
 	dir := t.TempDir()
-	p := New(dir, "")
+	p := New(dir, "", English)
 	if err := p.Start(); err != nil {
 		t.Fatal(err)
 	}
@@ -168,32 +169,81 @@ func TestPageLoadsNothingFromTheNetwork(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	html, err := renderHTML(view{State: stateScan, QR: path, QRSize: size}, "/Users/anna/.wacli", "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	page := string(html)
-	for _, addr := range regexp.MustCompile(`(?i)(https?:)?//[a-z0-9.-]+\.[a-z]{2,}[^\s"'<)]*`).FindAllString(page, -1) {
-		if addr != SourceURL {
-			t.Errorf("unexpected address in the page: %s", addr)
+	for lang := range texts {
+		html, err := renderHTML(view{State: stateScan, QR: path, QRSize: size}, lang, "/Users/anna/.wacli", "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		page := string(html)
+		for _, addr := range regexp.MustCompile(`(?i)(https?:)?//[a-z0-9.-]+\.[a-z]{2,}[^\s"'<)]*`).FindAllString(page, -1) {
+			if addr != SourceURL {
+				t.Errorf("%s: unexpected address in the page: %s", lang, addr)
+			}
+		}
+		for _, loads := range []string{"<link", "<img", "<iframe", "@import", "url(", "fetch(", "XMLHttpRequest", "sendBeacon", "WebSocket", "EventSource"} {
+			if strings.Contains(page, loads) {
+				t.Errorf("%s: the page must not contain %q", lang, loads)
+			}
+		}
+		if !strings.Contains(page, `content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline' 'self' file:"`) {
+			t.Errorf("%s: the page must carry the policy that blocks every network load", lang)
+		}
+		if got := strings.Count(page, "<script"); got != 1 {
+			t.Errorf("%s: %d script tags, want the one inline script", lang, got)
 		}
 	}
-	for _, loads := range []string{"<link", "<img", "<iframe", "@import", "url(", "fetch(", "XMLHttpRequest", "sendBeacon", "WebSocket", "EventSource"} {
-		if strings.Contains(page, loads) {
-			t.Errorf("the page must not contain %q", loads)
+}
+
+func TestLanguage(t *testing.T) {
+	for asked, want := range map[string]string{
+		"nl": Dutch, "NL": Dutch, " nl-BE ": Dutch, "nl_NL": Dutch,
+		"en": English, "en-GB": English, "": English, "de": English, "nld": English,
+	} {
+		if got := Language(asked); got != want {
+			t.Errorf("Language(%q) = %q, want %q", asked, got, want)
 		}
 	}
-	if !strings.Contains(page, `content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline' 'self' file:"`) {
-		t.Error("the page must carry the policy that blocks every network load")
+}
+
+// One layout, two sets of text: a sentence added in one language must exist
+// in the other, and a page speaks only the language it was asked for.
+func TestBothLanguagesSayEverything(t *testing.T) {
+	nl, en := reflect.ValueOf(texts[Dutch]), reflect.ValueOf(texts[English])
+	for i := 0; i < nl.NumField(); i++ {
+		name := nl.Type().Field(i).Name
+		if nl.Field(i).IsZero() || en.Field(i).IsZero() {
+			t.Errorf("text %s is missing in a language", name)
+		}
+		if nl.Field(i).Kind() == reflect.Slice && nl.Field(i).Len() != en.Field(i).Len() {
+			t.Errorf("text %s has a different number of entries per language", name)
+		}
 	}
-	if got := strings.Count(page, "<script"); got != 1 {
-		t.Errorf("%d script tags, want the one inline script", got)
+
+	page := func(lang string) string {
+		dir := t.TempDir()
+		p := New(dir, "", lang)
+		if err := p.Start(); err != nil {
+			t.Fatal(err)
+		}
+		defer p.Finish(0, nil)
+		html, _ := readPage(t, dir)
+		return html
+	}
+	dutch, english, other := page("nl"), page("en"), page("de")
+	if !strings.Contains(dutch, `<html lang="nl">`) || !strings.Contains(dutch, "Koppel je WhatsApp") || strings.Contains(dutch, "Link your WhatsApp") {
+		t.Error("the Dutch page is not only Dutch")
+	}
+	if !strings.Contains(english, `<html lang="en">`) || !strings.Contains(english, "Link your WhatsApp") || strings.Contains(english, "Koppel je WhatsApp") {
+		t.Error("the English page is not only English")
+	}
+	if !strings.Contains(other, `<html lang="en">`) {
+		t.Error("a language the page does not have must give English")
 	}
 }
 
 func TestPageEscapesWhatItIsGiven(t *testing.T) {
 	dir := `/tmp/</code><script>alert(1)</script>"&`
-	html, err := renderHTML(view{State: stateSyncing, Phone: `"><script>alert(2)</script>`}, dir, `--store "`+dir+`"`)
+	html, err := renderHTML(view{State: stateSyncing, Phone: `"><script>alert(2)</script>`}, Dutch, dir, `--store "`+dir+`"`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -243,7 +293,7 @@ func TestPromptPointsAtTheStore(t *testing.T) {
 			t.Fatalf("command does not reach the store: %s", line)
 		}
 	}
-	if !strings.Contains(elsewhere, "`wacli --store \"/data/wa\" auth --open`") {
+	if !strings.Contains(elsewhere, "`wacli --store \"/data/wa\" auth --open --lang nl`") || strings.Contains(plain, "--lang") {
 		t.Fatalf("prompt = %s", elsewhere)
 	}
 }
@@ -268,32 +318,34 @@ func TestWriteSamples(t *testing.T) {
 		stateHalted:   {State: stateHalted, Phone: "31612345678", Messages: 212},
 		stateStopped:  {State: stateStopped},
 	}
-	for name, v := range samples {
-		dir := filepath.Join(root, name)
-		if err := os.MkdirAll(dir, 0o700); err != nil {
-			t.Fatal(err)
-		}
-		p := New(dir, "")
-		// Far enough ahead that a sample is still current when it is looked at.
-		p.now = func() time.Time { return time.Now().Add(24 * time.Hour) }
-		if v.State == stateScan {
-			path, size, err := qrPath(sampleCode)
+	for lang := range texts {
+		for name, v := range samples {
+			dir := filepath.Join(root, lang, name)
+			if err := os.MkdirAll(dir, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			p := New(dir, "", lang)
+			// Far enough ahead that a sample is still current when it is looked at.
+			p.now = func() time.Time { return time.Now().Add(24 * time.Hour) }
+			if v.State == stateScan {
+				path, size, err := qrPath(sampleCode)
+				if err != nil {
+					t.Fatal(err)
+				}
+				v.QR, v.QRSize = path, size
+			}
+			if err := p.set(func(cur *view) { *cur = v }); err != nil {
+				t.Fatal(err)
+			}
+			// The sample shows the customer's folder, not the temp one it sits in.
+			html, err := renderHTML(p.cur, lang, store, "")
 			if err != nil {
 				t.Fatal(err)
 			}
-			v.QR, v.QRSize = path, size
+			if err := os.WriteFile(p.Path(), html, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			t.Log(p.Path())
 		}
-		if err := p.set(func(cur *view) { *cur = v }); err != nil {
-			t.Fatal(err)
-		}
-		// The sample shows the customer's folder, not the temp one it sits in.
-		html, err := renderHTML(p.cur, store, "")
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(p.Path(), html, 0o600); err != nil {
-			t.Fatal(err)
-		}
-		t.Log(p.Path())
 	}
 }

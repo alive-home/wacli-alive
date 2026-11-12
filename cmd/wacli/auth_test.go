@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"database/sql"
 	"math"
 	"os"
@@ -13,6 +14,10 @@ import (
 	"github.com/openclaw/wacli/internal/config"
 	"github.com/openclaw/wacli/internal/out"
 	"github.com/openclaw/wacli/internal/pairpage"
+	"github.com/openclaw/wacli/internal/sqliteutil"
+	"go.mau.fi/whatsmeow/proto/waAdv"
+	"go.mau.fi/whatsmeow/store/sqlstore"
+	"go.mau.fi/whatsmeow/types"
 )
 
 func TestAuthStatusPayloadIncludesLinkedJID(t *testing.T) {
@@ -413,7 +418,7 @@ func TestPairPageStoreFlag(t *testing.T) {
 
 func TestPairPageQRWriter(t *testing.T) {
 	dir := t.TempDir()
-	page := pairpage.New(dir, "")
+	page := pairpage.New(dir, "", "nl")
 	if err := page.Start(); err != nil {
 		t.Fatal(err)
 	}
@@ -437,11 +442,7 @@ func TestPairPageQRWriter(t *testing.T) {
 // exist in this build, flags included.
 func TestPairPagePromptCommandsExist(t *testing.T) {
 	root := newRootCmd(&rootFlags{})
-	lines := []string{"auth --open"}
-	for _, c := range pairpage.PromptCommands {
-		lines = append(lines, c.Command)
-	}
-	for _, line := range lines {
+	for _, line := range pairpage.TaughtCommands {
 		words := strings.Fields(line)
 		if problem := unavailableCommand(root, words); problem != "" {
 			t.Errorf("%s: %s", line, problem)
@@ -461,5 +462,63 @@ func TestPairPagePromptCommandsExist(t *testing.T) {
 				t.Errorf("%s: %s has no flag %s", line, cmd.CommandPath(), word)
 			}
 		}
+	}
+}
+
+// A customer who logged this device out in WhatsApp pairs again with `auth`
+// alone: the dead session is cleared, a live one is left as it is.
+func TestAuthForgetsOnlyARevokedSession(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "session.db")
+	container, err := sqlstore.New(ctx, "sqlite3", sqliteutil.FileURI(path, "_foreign_keys=on"), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	device := container.NewDevice()
+	device.ID = &types.JID{User: "15550000000", Device: 7, Server: types.DefaultUserServer}
+	device.Account = &waAdv.ADVSignedDeviceIdentity{
+		Details:             []byte{1},
+		AccountSignature:    make([]byte, 64),
+		AccountSignatureKey: make([]byte, 32),
+		DeviceSignature:     make([]byte, 64),
+	}
+	if err := device.Save(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := container.Close(); err != nil {
+		t.Fatal(err)
+	}
+	devices := func() (n int) {
+		t.Helper()
+		db, err := sql.Open("sqlite3", path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer db.Close()
+		if err := db.QueryRow(`SELECT COUNT(*) FROM whatsmeow_device`).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+
+	if err := forgetRevokedSession(ctx, dir); err != nil {
+		t.Fatal(err)
+	}
+	if devices() != 1 {
+		t.Fatal("a session WhatsApp did not revoke was forgotten")
+	}
+
+	if err := appPkg.MarkSessionRevoked(dir, "401: logged out from another device"); err != nil {
+		t.Fatal(err)
+	}
+	if err := forgetRevokedSession(ctx, dir); err != nil {
+		t.Fatal(err)
+	}
+	if devices() != 0 {
+		t.Fatal("the revoked session is still in the store")
+	}
+	if revoked, err := appPkg.SessionRevoked(dir); err != nil || !revoked {
+		t.Fatalf("SessionRevoked = %v, %v: the marker stays until WhatsApp confirms a new login", revoked, err)
 	}
 }

@@ -73,6 +73,7 @@ func (v view) live() bool {
 type Page struct {
 	storeDir  string
 	storeFlag string
+	lang      string
 	now       func() time.Time
 
 	mu     sync.Mutex
@@ -83,9 +84,10 @@ type Page struct {
 }
 
 // New prepares a page in storeDir. storeFlag is what a command needs to reach
-// this store (`--store "…"`), or empty when a bare `wacli` already does.
-func New(storeDir, storeFlag string) *Page {
-	return &Page{storeDir: storeDir, storeFlag: storeFlag, now: time.Now, stop: make(chan struct{})}
+// this store (`--store "…"`), or empty when a bare `wacli` already does. lang
+// is the language asked for; see Language.
+func New(storeDir, storeFlag, lang string) *Page {
+	return &Page{storeDir: storeDir, storeFlag: storeFlag, lang: Language(lang), now: time.Now, stop: make(chan struct{})}
 }
 
 // Path is the file a browser opens.
@@ -168,7 +170,7 @@ func (p *Page) set(change func(*view)) error {
 		p.cur.Until = now.Add(staleAfter).UnixMilli()
 	}
 
-	html, err := renderHTML(p.cur, p.storeDir, p.storeFlag)
+	html, err := renderHTML(p.cur, p.lang, p.storeDir, p.storeFlag)
 	if err != nil {
 		return err
 	}
@@ -186,16 +188,17 @@ func (p *Page) set(change func(*view)) error {
 	return nil
 }
 
-func renderHTML(v view, storeDir, storeFlag string) ([]byte, error) {
+func renderHTML(v view, lang, storeDir, storeFlag string) ([]byte, error) {
 	var buf bytes.Buffer
 	err := pageTemplate.Execute(&buf, map[string]any{
 		"View":     v,
 		"Live":     v.live(),
+		"Lang":     lang,
+		"T":        texts[lang],
 		"StoreDir": storeDir,
 		"Source":   SourceURL,
 		"SourceID": strings.TrimPrefix(SourceURL, "https://"),
-		"PromptNL": Prompt("nl", storeDir, storeFlag),
-		"PromptEN": Prompt("en", storeDir, storeFlag),
+		"Prompt":   Prompt(lang, storeDir, storeFlag),
 		"Script":   jsName,
 	})
 	if err != nil {
@@ -227,9 +230,8 @@ func qrPath(code string) (string, int, error) {
 	return b.String(), c.Size + 2*quietZone, nil
 }
 
-// PromptCommands are the commands the prompt teaches, with what each is for.
-// A test in cmd/wacli checks that this build has every one of them.
-var PromptCommands = []struct{ Command, NL, EN string }{
+// promptCommands are the commands the prompt teaches, with what each is for.
+var promptCommands = []struct{ Command, NL, EN string }{
 	{`sync --once`, "nieuwe berichten ophalen", "fetch new messages"},
 	{`chats list`, "mijn gesprekken tonen", "list my chats"},
 	{`messages search "tekst"`, "in alle berichten zoeken", "search all messages"},
@@ -239,31 +241,37 @@ var PromptCommands = []struct{ Command, NL, EN string }{
 
 var englishPlaceholders = strings.NewReplacer(`"tekst"`, `"text"`, `"naam"`, `"name"`)
 
+// TaughtCommands is every command a prompt names, in any language. A test in
+// cmd/wacli checks that this build has each of them.
+var TaughtCommands = func() []string {
+	var all []string
+	for _, c := range promptCommands {
+		all = append(all, c.Command)
+	}
+	for _, lang := range []string{Dutch, English} {
+		all = append(all, texts[lang].Relink)
+	}
+	return all
+}()
+
 // Prompt is the text a person pastes into their AI assistant so it knows what
-// this link is and how to read from it.
+// this link is and how to read from it. lang is Dutch or English.
 func Prompt(lang, storeDir, storeFlag string) string {
 	wacli := "wacli"
 	if storeFlag != "" {
 		wacli += " " + storeFlag
 	}
+	t := texts[lang]
 	var b strings.Builder
-	if lang == "nl" {
-		b.WriteString("Mijn WhatsApp is op deze computer gekoppeld met wacli. Het kan alleen lezen, niet versturen.\n\nOpdrachten:\n")
-	} else {
-		b.WriteString("My WhatsApp is linked on this computer with wacli. It can only read, not send.\n\nCommands:\n")
-	}
-	for _, c := range PromptCommands {
+	b.WriteString(t.PromptStart)
+	for _, c := range promptCommands {
 		use, command := c.EN, englishPlaceholders.Replace(c.Command)
-		if lang == "nl" {
+		if lang == Dutch {
 			use, command = c.NL, c.Command
 		}
 		fmt.Fprintf(&b, "- %s %s: %s\n", wacli, command, use)
 	}
-	if lang == "nl" {
-		fmt.Fprintf(&b, "\nMet --json krijg je uitvoer die je kunt verwerken. De berichten staan in %s.\nNiet meer gekoppeld? Start `%s auth --open`; ik scan de code.", storeDir, wacli)
-	} else {
-		fmt.Fprintf(&b, "\nAdd --json for output you can parse. The messages are in %s.\nNo longer linked? Run `%s auth --open` and I will scan the code.", storeDir, wacli)
-	}
+	fmt.Fprintf(&b, t.PromptEnd, storeDir, wacli+" "+t.Relink)
 	return b.String()
 }
 

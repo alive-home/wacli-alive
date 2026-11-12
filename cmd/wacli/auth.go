@@ -6,6 +6,7 @@ import (
 	"io"
 	"math"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -25,6 +26,7 @@ type authOptions struct {
 	downloadMedia  bool
 	qrFormat       string
 	openPage       bool
+	lang           string
 	phone          string
 	historyDays    int
 	historyPerChat int
@@ -76,6 +78,7 @@ func addAuthFlags(cmd *cobra.Command, opts *authOptions) {
 	cmd.Flags().BoolVar(&opts.downloadMedia, "download-media", false, "download media in the background during sync")
 	cmd.Flags().StringVar(&opts.qrFormat, "qr-format", "terminal", "QR output format: terminal or text")
 	cmd.Flags().BoolVar(&opts.openPage, "open", false, "show the QR code on a page in the default browser instead of in the terminal")
+	cmd.Flags().StringVar(&opts.lang, "lang", pairpage.English, "language of the --open page: nl or en (anything else gives en)")
 	cmd.Flags().StringVar(&opts.phone, "phone", "", "pair by phone number instead of QR code")
 	cmd.Flags().IntVar(&opts.historyDays, "history-days", 0, "days of history to ask the phone for while pairing (0 = no limit, what the phone decides)")
 	cmd.Flags().IntVar(&opts.historyPerChat, "history-max-per-chat", 0, "cap the messages each chat brings while pairing (0 = no cap)")
@@ -105,6 +108,9 @@ func runAuth(flags *rootFlags, opts authOptions) (res appPkg.SyncResult, err err
 		return appPkg.SyncResult{}, err
 	}
 	defer closeApp(a, lk)
+	if err := forgetRevokedSession(ctx, a.StoreDir()); err != nil {
+		return appPkg.SyncResult{}, err
+	}
 
 	mode := appPkg.SyncModeBootstrap
 	if opts.follow {
@@ -119,7 +125,7 @@ func runAuth(flags *rootFlags, opts authOptions) (res appPkg.SyncResult, err err
 	onQRCode := authQRWriter(validated.qrFormat, os.Stdout, os.Stderr, a.Events())
 	var onConnected func()
 	if opts.openPage {
-		page, pageErr := openPairPage(flags, a, os.Stderr)
+		page, pageErr := openPairPage(flags, a, opts.lang, os.Stderr)
 		if pageErr != nil {
 			return appPkg.SyncResult{}, pageErr
 		}
@@ -254,10 +260,22 @@ func authQRWriter(format string, stdout, stderr io.Writer, events *out.EventWrit
 	}
 }
 
+// forgetRevokedSession clears a session WhatsApp revoked, so that auth shows a
+// new code instead of failing on the old login. It stays local, like
+// `auth logout`; the marker goes when WhatsApp confirms the new login.
+func forgetRevokedSession(ctx context.Context, storeDir string) error {
+	revoked, err := appPkg.SessionRevoked(storeDir)
+	if err != nil || !revoked {
+		return err
+	}
+	_, err = wa.ForgetDevice(ctx, filepath.Join(storeDir, "session.db"))
+	return err
+}
+
 // openPairPage writes the pairing page and shows it in the default browser.
 // A browser that cannot be opened is not fatal: the path is printed instead.
-func openPairPage(flags *rootFlags, a *appPkg.App, stderr io.Writer) (*pairpage.Page, error) {
-	page := pairpage.New(a.StoreDir(), pairPageStoreFlag(flags, a.StoreDir()))
+func openPairPage(flags *rootFlags, a *appPkg.App, lang string, stderr io.Writer) (*pairpage.Page, error) {
+	page := pairpage.New(a.StoreDir(), pairPageStoreFlag(flags, a.StoreDir()), lang)
 	if err := page.Start(); err != nil {
 		return nil, err
 	}
