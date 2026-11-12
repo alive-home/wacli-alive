@@ -15,7 +15,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-const sourceVersion = "0.16.0"
+const sourceVersion = "0.16.0-readonly"
 
 var version string
 
@@ -56,8 +56,8 @@ func execute(args []string) error {
 
 	rootCmd := &cobra.Command{
 		Use:           "wacli",
-		Short:         "WhatsApp CLI: sync, search, send",
-		Long:          "wacli is a WhatsApp CLI for syncing, searching, and sending from local scripts.\n\nDocs: " + docsURL,
+		Short:         "WhatsApp CLI (read-only build): sync, search",
+		Long:          "wacli is a WhatsApp CLI for syncing and searching from local scripts.\nThis is a read-only build: sending and mutating WhatsApp state is disabled.\n\nDocs: " + docsURL,
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		Version:       effectiveVersion(),
@@ -80,8 +80,8 @@ func execute(args []string) error {
 	rootCmd.AddCommand(newSyncCmd(&flags))
 	rootCmd.AddCommand(newMessagesCmd(&flags))
 	rootCmd.AddCommand(newCallsCmd(&flags))
-	rootCmd.AddCommand(newSendCmd(&flags))
-	rootCmd.AddCommand(newPollCmd(&flags))
+	// Read-only build: send, poll and presence commands are not registered.
+	// The WAClient guard additionally hard-blocks every mutating operation.
 	rootCmd.AddCommand(newPollsCmd(&flags))
 	rootCmd.AddCommand(newMediaCmd(&flags))
 	rootCmd.AddCommand(newContactsCmd(&flags))
@@ -89,7 +89,6 @@ func execute(args []string) error {
 	rootCmd.AddCommand(newGroupsCmd(&flags))
 	rootCmd.AddCommand(newChannelsCmd(&flags))
 	rootCmd.AddCommand(newHistoryCmd(&flags))
-	rootCmd.AddCommand(newPresenceCmd(&flags))
 	rootCmd.AddCommand(newProfileCmd(&flags))
 	rootCmd.AddCommand(newDocsCmd(&flags))
 	rootCmd.AddCommand(newStoreCmd(&flags))

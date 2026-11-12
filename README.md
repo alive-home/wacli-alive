@@ -1,5 +1,7 @@
 # wacli 🗃️ — WhatsApp from your terminal
 
+> **Read-only fork.** This is a private fork of [openclaw/wacli](https://github.com/openclaw/wacli) that can sync and search but cannot send or change anything on WhatsApp. Build it from this checkout with `pnpm build`. Do not install it with Homebrew, `go install`, or the upstream release archives described below: those give you the upstream build, which can send. Upstream's CI, release, docs-site and remote-runner automation is removed here. The only network traffic is the WhatsApp connection itself, plus `sync --webhook` if you pass it.
+
 ![wacli banner](docs/assets/readme-banner.jpg)
 
 [![CI](https://img.shields.io/github/actions/workflow/status/openclaw/wacli/ci.yml?branch=main&style=flat-square&label=ci)](https://github.com/openclaw/wacli/actions/workflows/ci.yml)

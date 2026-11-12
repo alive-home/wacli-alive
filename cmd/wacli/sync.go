@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"fmt"
 	"os"
 	"time"
@@ -54,8 +53,7 @@ func newSyncCmd(flags *rootFlags) *cobra.Command {
 			if staleThreshold != 0 && staleThreshold < time.Second {
 				return fmt.Errorf("--stale-threshold must be at least 1s, got %s", staleThreshold)
 			}
-			sendSpacing, err := parseSendSpacing(sendSpacingFlag)
-			if err != nil {
+			if _, err := parseSendSpacing(sendSpacingFlag); err != nil {
 				return err
 			}
 			if maxStaleThreshold := appPkg.MaxStaleThreshold(); staleThreshold >= maxStaleThreshold {
@@ -87,29 +85,15 @@ func newSyncCmd(flags *rootFlags) *cobra.Command {
 				mode = appPkg.SyncModeOnce
 			}
 
-			var stopSendDelegate func()
-			defer func() {
-				if stopSendDelegate != nil {
-					stopSendDelegate()
-				}
-			}()
-			var afterConnect func(context.Context) error
-			if mode == appPkg.SyncModeFollow {
-				afterConnect = func(ctx context.Context) error {
-					stop, err := startSendDelegateServer(ctx, a, sendSpacing)
-					if err != nil {
-						return err
-					}
-					stopSendDelegate = stop
-					return nil
-				}
-			}
+			// Read-only build: follow mode does not open the send-delegate
+			// socket. Every delegated send ends at the WAClient guard anyway,
+			// and a delegated text would still fetch its link preview first,
+			// which is an outbound request to an arbitrary host.
 
 			res, err := a.Sync(ctx, appPkg.SyncOptions{
 				Mode:                mode,
 				PresenceMode:        presenceMode,
 				AllowQR:             false,
-				AfterConnect:        afterConnect,
 				DownloadMedia:       downloadMedia,
 				RefreshContacts:     refreshContacts,
 				RefreshGroups:       refreshGroups,
@@ -146,7 +130,7 @@ func newSyncCmd(flags *rootFlags) *cobra.Command {
 	cmd.Flags().DurationVar(&maxReconnect, "max-reconnect", 5*time.Minute, "give up reconnecting after this duration (0 = unlimited)")
 	cmd.Flags().DurationVar(&staleThreshold, "stale-threshold", 0, "force reconnect when keepalive failures last this long in follow mode (1s-<2m20s, 0 = disabled)")
 	cmd.Flags().StringVar(&presenceModeFlag, "presence-mode", string(appPkg.SyncPresenceModeNormal), "global sync presence behavior: normal or quiet")
-	cmd.Flags().StringVar(&sendSpacingFlag, "send-spacing", "", "pace delegated sends in follow mode by a fixed duration or random min-max range (e.g. 2s or 500ms-5s; default: disabled)")
+	cmd.Flags().StringVar(&sendSpacingFlag, "send-spacing", "", "accepted for compatibility; no effect in the read-only build (follow mode does not accept delegated sends)")
 	cmd.Flags().BoolVar(&downloadMedia, "download-media", false, "download media in the background during sync")
 	cmd.Flags().BoolVar(&refreshContacts, "refresh-contacts", false, "refresh contacts from session store into local DB")
 	cmd.Flags().BoolVar(&refreshGroups, "refresh-groups", false, "refresh joined groups (live) into local DB")

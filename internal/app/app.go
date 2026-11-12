@@ -172,7 +172,9 @@ func (a *App) OpenWA() error {
 		return err
 	}
 
-	a.wa = cli
+	// Read-only build: wrap every client in the guard so no code path can
+	// send or mutate WhatsApp state, regardless of which command runs.
+	a.wa = guardWAClient(cli)
 	return nil
 }
 

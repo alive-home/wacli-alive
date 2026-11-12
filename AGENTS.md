@@ -1,5 +1,20 @@
 # Repository Guidelines
 
+> **READ-ONLY FORK.** This clone (openclaw/wacli) is patched so sending and
+> mutating WhatsApp state is impossible. The invariant lives in
+> `internal/app/guard.go`: every WhatsApp client is wrapped in `guardWA`
+> (wired in `internal/app/app.go` `OpenWA()`), which hard-blocks all
+> `WAClient` methods that send or mutate and silently drops presence updates.
+> `send`, `poll` and `presence` commands are not registered in
+> `cmd/wacli/root.go`. Do not remove or bypass the guard; if upstream changes
+> add new mutating `WAClient` methods, block them in `guard.go` too.
+>
+> **Local only.** Upstream's `.github/` workflows, `.crabbox.yaml`, the crabbox
+> skill and `docs/CNAME` are deleted on purpose: they dispatch to openclaw
+> infrastructure or publish through it. Keep them deleted when merging
+> upstream. `sync --follow` does not open the send-delegate socket
+> (`cmd/wacli/sync.go`), so nothing reaches the link-preview fetcher.
+
 ## Project Structure
 - `cmd/wacli/`: CLI command wiring (auth, sync, messages, send, media, contacts, chats, groups, history, presence, doctor).
 - `internal/app/`: core app, whatsmeow event handling, backfill, sync idle logic.
