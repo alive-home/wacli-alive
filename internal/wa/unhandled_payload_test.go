@@ -5,6 +5,8 @@ import (
 	"time"
 
 	waProto "go.mau.fi/whatsmeow/binary/proto"
+	"go.mau.fi/whatsmeow/proto/waCommon"
+	"go.mau.fi/whatsmeow/proto/waE2E"
 	"go.mau.fi/whatsmeow/types"
 	"go.mau.fi/whatsmeow/types/events"
 	"google.golang.org/protobuf/proto"
@@ -180,5 +182,69 @@ func TestMarkUnhandledPayloadIgnoresWrappedText(t *testing.T) {
 	}
 	if pm.UnhandledPayload != "" {
 		t.Fatalf("expected no unhandled payload, got %q", pm.UnhandledPayload)
+	}
+}
+
+func TestParseLiveMessageExtractsCommentMessage(t *testing.T) {
+	pm := ParseLiveMessage(liveEvent(&waProto.Message{
+		CommentMessage: &waE2E.CommentMessage{
+			TargetMessageKey: &waCommon.MessageKey{
+				ID: proto.String("TARGET-123"),
+			},
+			Message: &waProto.Message{
+				Conversation: proto.String("this is a comment"),
+			},
+		},
+	}))
+	if pm.Text != "this is a comment" {
+		t.Fatalf("expected comment text, got %q", pm.Text)
+	}
+	if pm.ReplyToID != "TARGET-123" {
+		t.Fatalf("expected ReplyToID TARGET-123, got %q", pm.ReplyToID)
+	}
+	if pm.UnhandledPayload != "" {
+		t.Fatalf("expected no unhandled payload, got %q", pm.UnhandledPayload)
+	}
+}
+
+func TestParseLiveMessageExtractsAlbumMessage(t *testing.T) {
+	pm := ParseLiveMessage(liveEvent(&waProto.Message{
+		AlbumMessage: &waE2E.AlbumMessage{
+			ExpectedImageCount: proto.Uint32(3),
+			ExpectedVideoCount: proto.Uint32(1),
+		},
+	}))
+	if pm.Text != "[Album: 3 images, 1 videos]" {
+		t.Fatalf("expected album text, got %q", pm.Text)
+	}
+	if pm.UnhandledPayload != "" {
+		t.Fatalf("expected no unhandled payload, got %q", pm.UnhandledPayload)
+	}
+}
+
+// A protocol message the parser does not apply is named with its type, so a
+// "(message)" row from an internal control can be told from a missed mutation
+// (#546). One without a type keeps the bare field name.
+func TestMarkUnhandledPayloadNamesProtocolType(t *testing.T) {
+	cases := []struct {
+		name     string
+		protocol *waProto.ProtocolMessage
+		want     string
+	}{
+		{"internal control", &waProto.ProtocolMessage{Type: waProto.ProtocolMessage_APP_STATE_SYNC_KEY_SHARE.Enum()}, "protocolMessage:APP_STATE_SYNC_KEY_SHARE"},
+		{"revoke without key", &waProto.ProtocolMessage{Type: waProto.ProtocolMessage_REVOKE.Enum()}, "protocolMessage:REVOKE"},
+		{"unknown type number", &waProto.ProtocolMessage{Type: waProto.ProtocolMessage_Type(9999).Enum()}, "protocolMessage:9999"},
+		{"no type", &waProto.ProtocolMessage{}, "protocolMessage"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			pm := ParseLiveMessage(liveEvent(&waProto.Message{ProtocolMessage: tc.protocol}))
+			if pm.HasContent() {
+				t.Fatalf("expected no content, got %+v", pm)
+			}
+			if pm.UnhandledPayload != tc.want {
+				t.Fatalf("UnhandledPayload = %q, want %q", pm.UnhandledPayload, tc.want)
+			}
+		})
 	}
 }

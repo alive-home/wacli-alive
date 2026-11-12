@@ -1,20 +1,23 @@
 ---
 title: Quickstart
-description: "Pair as a linked WhatsApp Web device, sync, search, and send your first message in under five minutes."
+description: "Pair as a linked WhatsApp Web device, sync, and search your messages in under five minutes."
 ---
 
 # Quickstart
 
-Five minutes from a clean machine to authenticated sync, search, and send. For deeper reading, follow the links at the bottom of each step.
+Five minutes from a clean machine to authenticated sync and search. This build reads WhatsApp; it cannot send or change anything. For deeper reading, follow the links at the bottom of each step.
 
 ## 1. Install
 
 ```bash
-brew install openclaw/tap/wacli
+mkdir -p dist
+CGO_ENABLED=1 CGO_CFLAGS="-Wno-error=missing-braces" \
+  go build -tags sqlite_fts5 -o dist/wacli ./cmd/wacli
+install -m 755 dist/wacli ~/.local/bin/wacli
 wacli --version
 ```
 
-Other options (release archives, source builds, GCC 15 notes) are documented on [Install](install.md).
+Run this from a checkout of this repository. Requirements and platform notes are on [Install](install.md).
 
 ## 2. Pair as a linked device
 
@@ -26,7 +29,7 @@ wacli auth
 
 If the terminal QR does not scan, try `--qr-format text` and render that raw QR payload in another app, or pair via phone-number code with `--phone +15551234567`.
 
-> Refresh tokens last as long as the linked device stays linked on your phone. Unlinking from the phone (or `wacli auth logout`) ends the session and requires a fresh QR.
+> The session lasts as long as the linked device stays linked on your phone. Unlinking it there (WhatsApp → **Linked devices**) ends the session and requires a fresh QR. `wacli auth logout` clears the local session only; it does not remove the device on your phone.
 
 Verify:
 
@@ -65,34 +68,7 @@ wacli messages context --chat 1234567890@s.whatsapp.net --id <message-id> --befo
 
 `--json` produces a stable envelope; `--full` keeps full IDs in tables. See [Messages](messages.md) for every filter.
 
-## 5. Send a message
-
-```bash
-# Send a text message by phone number, JID, or synced contact/group/chat name
-wacli send text --to mom --message "hello"
-
-# Send a quoted reply
-wacli send text --to 1234567890 --message "replying" --reply-to <message-id>
-
-# Send a file with a caption
-wacli send file --to 1234567890 --file ./pic.jpg --caption "hi"
-
-# Send a 512x512 WebP sticker
-wacli send sticker --to 1234567890 --file ./sticker-512.webp
-
-# Send a native voice note (OGG/Opus)
-wacli send voice --to 1234567890 --file ./voice.ogg
-
-# React (omit --reaction for the default thumbs-up; use --reaction "" to clear)
-wacli send react --to 1234567890 --id <message-id> --reaction "🎉"
-
-# Post a WhatsApp status broadcast
-wacli send status --message "available today" --background-color '#1f7a8c'
-```
-
-Recipient resolution and disambiguation (`--pick N`, ambiguous-name prompts), link-preview behavior, status broadcasts, and post-send waits are documented in [Send](send.md).
-
-## 6. Backfill older history (optional, best-effort)
+## 5. Backfill older history (optional, best-effort)
 
 `sync` only stores what WhatsApp Web pushes. To request older messages for a specific chat from your **primary device** (your phone), use:
 
@@ -104,7 +80,7 @@ wacli history backfill --chat 1234567890@s.whatsapp.net --requests 10 --count 50
 
 The phone must be online for `backfill`. WhatsApp may not return full history. See [History](history.md) for coverage planning, limits, and patterns.
 
-## 7. Named accounts (optional)
+## 6. Named accounts (optional)
 
 If you run more than one WhatsApp number, named accounts give each an isolated store, session, and lock:
 
@@ -117,25 +93,25 @@ wacli accounts list
 
 # Use a named account with any command
 wacli --account work sync --follow
-wacli --account personal send text --to mom --message "hi"
+wacli --account personal messages search "invoice"
 ```
 
 Use `--no-auth` to create the account entry without pairing immediately. Two accounts can sync concurrently — their locks are independent. See [Accounts](accounts.md) for YAML config and migration from manual `--store` paths.
 
-## 8. Diagnostics and safety
+## 7. Diagnostics and safety
 
 ```bash
 wacli doctor
 wacli doctor --connect
 
-# Read-only mode for agents / sandboxes
+# Also keep commands from writing the local store
 wacli --read-only messages search "invoice"
-WACLI_READONLY=1 wacli send text --to mom --message "hi"   # exits with a clear error
+WACLI_READONLY=1 wacli store cleanup   # exits with a clear error
 ```
 
 `doctor` checks the store, schema, FTS5 availability, and (with `--connect`) live connectivity. See [Doctor](doctor.md).
 
-## 9. Shell completion (optional)
+## 8. Shell completion (optional)
 
 ```bash
 wacli completion bash    >> ~/.bash_completion
@@ -147,8 +123,7 @@ wacli completion fish    >  ~/.config/fish/completions/wacli.fish
 
 - [Overview](overview.md) — global flags, store model, full command map.
 - [Accounts](accounts.md) — named accounts, isolated stores, YAML config.
-- [Send](send.md) — every recipient form, replies, reactions, mentions, link previews.
-- [Channels](channels.md) — read and follow WhatsApp Channels.
-- [Groups](groups.md) — list, refresh, info, rename, participants, invite links.
+- [Channels](channels.md) — read WhatsApp Channels.
+- [Groups](groups.md) — list, refresh, info, participants, invite links.
 - [Spec](spec.md) — design notes, storage layout, locking model, non-goals.
 - [Doctor](doctor.md) — self-checks and connectivity probe.

@@ -3,28 +3,28 @@ import fs from "node:fs";
 import path from "node:path";
 
 import { css, faviconSvg, js, socialCardSvg, themeBootstrapScript, themeToggleMarkup } from "./docs-site-assets.mjs";
-import { escapeAttr, escapeHtml, markdownToHtml, tocFromHtml, validateLinks } from "./docs-site-render.mjs";
+import { escapeAttr, escapeHtml, renderMarkdown, tocFromHeadings, validateLinks } from "./docs-site-render.mjs";
 
 const root = process.cwd();
 const docsDir = path.join(root, "docs");
 const outDir = path.join(root, "dist", "docs-site");
-const repoBase = "https://github.com/openclaw/wacli";
+const repoBase = "https://github.com/alive-home/wacli-alive";
 const repoEditBase = `${repoBase}/edit/main/docs`;
 const cname = readCname();
 const siteBase = cname ? `https://${cname}` : "";
 
 const productName = "wacli";
-const productTagline = "WhatsApp in your terminal";
+const productTagline = "Read WhatsApp in your terminal";
 const productDescription =
-  "A single Go CLI that pairs as a linked WhatsApp Web device, mirrors message history into local SQLite with FTS5 search, and exposes send, media, contact, and group workflows for terminals, scripts, and coding agents.";
-const brewInstall = "brew install openclaw/tap/wacli";
+  "A read-only Go CLI that pairs as a linked WhatsApp Web device, mirrors message history into local SQLite with FTS5 search, and exposes search, media, contact, and group reads for terminals, scripts, and coding agents. It cannot send or change anything on WhatsApp.";
+const brewInstall = "make build";
 
 const sections = [
   ["Start", ["index.md", "install.md", "quickstart.md", "overview.md"]],
   ["Auth & Sync", ["auth.md", "accounts.md", "sync.md", "history.md", "doctor.md"]],
-  ["Messages", ["messages.md", "send.md", "media.md", "presence.md", "channels.md"]],
+  ["Messages", ["messages.md", "media.md", "channels.md"]],
   ["Contacts & Groups", ["contacts.md", "contacts-import-system.md", "chats.md", "groups.md", "profile.md"]],
-  ["Reference", ["spec.md", "docs.md", "store.md", "integrations.md", "completion.md", "version.md", "help.md", "release.md"]],
+  ["Reference", ["spec.md", "store.md", "integrations.md", "completion.md", "version.md", "help.md"]],
 ];
 
 const buildExcludes = [];
@@ -62,8 +62,8 @@ for (const section of nav) for (const page of section.pages) sectionByRel.set(pa
 const orderedPages = nav.flatMap((s) => s.pages);
 
 for (const page of pages) {
-  const html = markdownToHtml(page.markdown, page.rel, rewriteHref);
-  const toc = tocFromHtml(html);
+  const { html, headings } = renderMarkdown(page.markdown, page.rel, rewriteHref);
+  const toc = tocFromHeadings(headings);
   const idx = orderedPages.findIndex((p) => p.rel === page.rel);
   const prev = idx > 0 ? orderedPages[idx - 1] : null;
   const next = idx >= 0 && idx < orderedPages.length - 1 ? orderedPages[idx + 1] : null;
@@ -251,7 +251,7 @@ function homeHero(page) {
   const quickstartRel = pageMap.get("quickstart.md")?.outRel
     ? hrefToOutRel(pageMap.get("quickstart.md").outRel, page.outRel)
     : "quickstart.html";
-  const features = ["Pair", "Sync", "Search", "Send", "Media", "Contacts", "Chats", "Groups", "History", "Presence", "Doctor"];
+  const features = ["Pair", "Sync", "Search", "Media", "Contacts", "Chats", "Groups", "History", "Doctor"];
   return `<header class="home-hero">
         <p class="eyebrow">WhatsApp · One CLI</p>
         <h1>${escapeHtml(productTagline)}</h1>
@@ -259,7 +259,7 @@ function homeHero(page) {
         <div class="home-cta">
           <a class="btn btn-primary" href="${quickstartRel}">Quickstart</a>
           <a class="btn btn-ghost" href="${repoBase}" rel="noopener">GitHub</a>
-          <div class="home-install" aria-label="Install with Homebrew">
+          <div class="home-install" aria-label="Build from source">
             <span class="prompt" aria-hidden="true">$</span>
             <code>${escapeHtml(brewInstall)}</code>
           </div>
@@ -342,7 +342,7 @@ function layout({ page, html, toc, prev, next, sectionName }) {
         </a>
         ${themeToggleMarkup()}
       </div>
-      <label class="search"><span>Search</span><input id="doc-search" type="search" placeholder="auth, sync, send"></label>
+      <label class="search"><span>Search</span><input id="doc-search" type="search" placeholder="auth, sync, search"></label>
       <nav>${navHtml(page)}</nav>
     </aside>
     <main>

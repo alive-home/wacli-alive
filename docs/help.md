@@ -3,7 +3,7 @@
 Read when: discovering command usage from the CLI itself.
 
 `wacli help` is the Cobra-provided help command. Every command also accepts `--help`.
-Root help prints the hosted documentation URL, and `wacli docs` prints it directly.
+Running a command this build removed prints `wacli read-only build: this binary cannot send to or change WhatsApp: "wacli <command>" is not available` and exits 1.
 
 ## Commands
 
@@ -15,9 +15,7 @@ wacli [command] --help
 ## Examples
 
 ```bash
-wacli help send
-wacli send text --help
-wacli send status --help
-wacli docs
-wacli groups participants add --help
+wacli help sync
+wacli messages search --help
+wacli groups participants list --help
 ```

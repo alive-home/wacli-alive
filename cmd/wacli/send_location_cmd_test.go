@@ -141,19 +141,3 @@ func TestPersistOutboundLocationCanonicalizesChatAndSetsDisplayText(t *testing.T
 		t.Fatalf("expected no body text on a location, got %q", msg.Text)
 	}
 }
-
-func TestExecuteDelegatedSendRejectsOutOfRangeLocation(t *testing.T) {
-	_, err := executeDelegatedSend(context.Background(), nil, sendDelegateRequest{
-		Version:   sendDelegateVersion,
-		Kind:      "location",
-		To:        "15551234567",
-		Latitude:  120,
-		Longitude: 0,
-	})
-	if err == nil {
-		t.Fatal("expected out-of-range latitude to be rejected before any send")
-	}
-	if !strings.Contains(err.Error(), "--latitude must be between") {
-		t.Fatalf("expected a latitude bounds error, got %q", err.Error())
-	}
-}

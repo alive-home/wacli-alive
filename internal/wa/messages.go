@@ -1,6 +1,7 @@
 package wa
 
 import (
+	"fmt"
 	"sort"
 	"strings"
 	"time"
@@ -103,9 +104,12 @@ type ParsedMessage struct {
 
 func ParseLiveMessage(evt *events.Message) ParsedMessage {
 	msg := ParsedMessage{
-		Chat:      evt.Info.Chat,
-		ID:        evt.Info.ID,
-		Timestamp: evt.Info.Timestamp,
+		Chat: evt.Info.Chat,
+		ID:   evt.Info.ID,
+		// UTC, matching ParseHistoryMessage: this value is marshalled straight
+		// into webhook payloads, where the host's zone would otherwise decide
+		// the wire format. The instant is unchanged.
+		Timestamp: evt.Info.Timestamp.UTC(),
 		FromMe:    evt.Info.IsFromMe,
 		PushName:  evt.Info.PushName,
 	}
@@ -146,16 +150,28 @@ func ParseHistoryMessage(chatJID string, hist *waProto.WebMessageInfo) ParsedMes
 	}
 	pm.SenderJID = sender
 
-	if hist.GetMessage() != nil {
-		markUnhandledPayload(extractWAProto(hist.GetMessage(), &pm), &pm)
+	if raw := hist.GetMessage(); raw != nil {
+		// whatsmeow unwraps live events before dispatch but not history
+		// messages, so content inside ephemeral, view-once or
+		// document-with-caption envelopes would otherwise be stored as
+		// "(message)". Apply the same unwrapping, then carry over what the
+		// envelopes said about the message.
+		evt := (&events.Message{RawMessage: raw}).UnwrapRaw()
+		if evt.Info.DeviceSentMeta != nil {
+			applyDeviceSentDestination(evt.Info.DeviceSentMeta.DestinationJID, &pm)
+		}
+		if evt.IsEdit {
+			pm.Edited = true
+		}
+		markUnhandledPayload(extractWAProto(evt.Message, &pm), &pm)
 	}
 	return pm
 }
 
-// hasContent reports whether parsing produced anything storable. A message with
+// HasContent reports whether parsing produced anything storable. A message with
 // no content is persisted with a "(message)" placeholder, which is
 // indistinguishable from a message that genuinely carried nothing.
-func (pm ParsedMessage) hasContent() bool {
+func (pm ParsedMessage) HasContent() bool {
 	return strings.TrimSpace(pm.Text) != "" ||
 		pm.Media != nil ||
 		pm.Poll != nil ||
@@ -174,7 +190,7 @@ func (pm ParsedMessage) hasContent() bool {
 // discarding content. Field names come from the protobuf descriptor, so new
 // WhatsApp message types are reported without needing a code change here.
 func markUnhandledPayload(m *waProto.Message, pm *ParsedMessage) {
-	if m == nil || pm == nil || pm.hasContent() {
+	if m == nil || pm == nil || pm.HasContent() {
 		return
 	}
 	var names []string
@@ -182,6 +198,14 @@ func markUnhandledPayload(m *waProto.Message, pm *ParsedMessage) {
 		switch fd.Name() {
 		case "messageContextInfo":
 			return true
+		case "protocolMessage":
+			// The type is what tells an internal control (key share, peer data
+			// operation, history notification) from a mutation the parser missed;
+			// the bare field name reported them all alike (#546).
+			if protocol := m.GetProtocolMessage(); protocol != nil && protocol.Type != nil {
+				names = append(names, "protocolMessage:"+protocol.GetType().String())
+				return true
+			}
 		}
 		names = append(names, string(fd.Name()))
 		return true
@@ -220,16 +244,37 @@ func extractWAProto(m *waProto.Message, pm *ParsedMessage) *waProto.Message {
 		}
 		return m
 	}
+	if inner := contentWrapper(m); inner != nil {
+		return extractWAProto(inner, pm)
+	}
+	if comment := m.GetCommentMessage(); comment.GetMessage() != nil {
+		leaf := extractWAProto(comment.GetMessage(), pm)
+		if target := comment.GetTargetMessageKey(); strings.TrimSpace(target.GetID()) != "" {
+			id := strings.TrimSpace(target.GetID())
+			if pm.ReplyToID != id {
+				// Inner quoted content describes a different target.
+				pm.ReplyToSenderJID = ""
+				pm.ReplyToDisplay = ""
+			}
+			pm.ReplyToID = id
+			if sender := strings.TrimSpace(target.GetParticipant()); sender != "" {
+				pm.ReplyToSenderJID = sender
+			}
+		}
+		return leaf
+	}
 	extractReaction(m, pm)
 	extractPlainText(m, pm)
 	extractMedia(m, pm)
 	extractLocation(m, pm)
 	extractContactText(m, pm)
 	extractBusinessText(m, pm)
+	extractBusinessHeaderMedia(m, pm)
 	extractPoll(m, pm)
 	extractPollAddOption(m, pm)
 	extractPollUpdate(m, pm)
 	extractCallLog(m, pm)
+	extractAlbum(m, pm)
 
 	if ctx := contextInfoForMessage(m); ctx != nil {
 		if id := strings.TrimSpace(ctx.GetStanzaID()); id != "" {
@@ -436,6 +481,8 @@ func extractPlainText(m *waProto.Message, pm *ParsedMessage) {
 		pm.Text = m.GetConversation()
 	case m.GetExtendedTextMessage() != nil:
 		pm.Text = m.GetExtendedTextMessage().GetText()
+	case m.GetGroupInviteMessage() != nil:
+		pm.Text = groupInviteText(m.GetGroupInviteMessage())
 	}
 }
 
@@ -446,4 +493,43 @@ func clone(b []byte) []byte {
 	out := make([]byte, len(b))
 	copy(out, b)
 	return out
+}
+
+func extractAlbum(m *waProto.Message, pm *ParsedMessage) {
+	album := m.GetAlbumMessage()
+	if album == nil {
+		return
+	}
+	if pm.Text == "" {
+		imgs := album.GetExpectedImageCount()
+		vids := album.GetExpectedVideoCount()
+		switch {
+		case imgs > 0 && vids > 0:
+			pm.Text = fmt.Sprintf("[Album: %d images, %d videos]", imgs, vids)
+		case imgs > 0:
+			pm.Text = fmt.Sprintf("[Album: %d images]", imgs)
+		case vids > 0:
+			pm.Text = fmt.Sprintf("[Album: %d videos]", vids)
+		default:
+			pm.Text = "[Album]"
+		}
+	}
+}
+
+// These envelopes retain the outer identity while carrying ordinary content.
+func contentWrapper(m *waProto.Message) *waProto.Message {
+	if inner := m.GetAssociatedChildMessage().GetMessage(); inner != nil {
+		return inner
+	}
+	return m.GetGroupStatusMentionMessage().GetMessage()
+}
+
+func groupInviteText(invite *waE2E.GroupInviteMessage) string {
+	if caption := invite.GetCaption(); strings.TrimSpace(caption) != "" {
+		return caption
+	}
+	if name := strings.TrimSpace(invite.GetGroupName()); name != "" {
+		return "Group invite: " + name
+	}
+	return "[Group invite]"
 }

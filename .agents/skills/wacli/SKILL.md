@@ -1,15 +1,15 @@
 ---
 name: wacli
-description: "wacli: WhatsApp linked devices, stores, sync/auth/send, repo/release work."
+description: "wacli read-only build: WhatsApp linked devices, stores, sync/auth, reading messages, repo work."
 ---
 
 # Wacli
 
-Use this for `wacli` repo work and local WhatsApp linked-device stores. Prefer read-only commands for inspection unless the user explicitly asks to auth, sync, send, mutate chats/groups, or release.
+Use this for `wacli` repo work and local WhatsApp linked-device stores. This is the read-only build: it cannot send messages or change anything on WhatsApp, and must stay that way (see `AGENTS.md`). Prefer `--read-only` for inspection unless the user explicitly asks to auth or sync.
 
 ## Sources
 
-- Repo: `~/Projects/wacli`
+- Repo: this checkout
 - CLI in repo: `./dist/wacli` after `pnpm build`
 - Installed CLI: `wacli`
 - Default config: `~/.wacli/config.yaml`
@@ -22,7 +22,7 @@ Use this for `wacli` repo work and local WhatsApp linked-device stores. Prefer r
 
 - Use `--read-only` or `WACLI_READONLY=1` for inspection.
 - Use `--json` for parsing.
-- Do not send messages unless explicitly asked.
+- Never install or call upstream `wacli` (Homebrew, `go install`, release archives): it can send. `wacli --version` must end in `-readonly`.
 - Do not write `session.db` directly.
 - Do not merge account data into one `wacli.db`; named accounts are isolated stores.
 - Watch dirty worktrees; leave unrelated files alone.
@@ -99,11 +99,7 @@ Interactive TTY sync progress should be concise; warnings must remain visible. `
 
 ## Repo Workflow
 
-Read docs before coding when behavior changes:
-
-```bash
-pnpm -s docs:list || bin/docs-list || true
-```
+Read the pages in `docs/` before coding when behavior changes.
 
 Focused tests first, then full gate:
 
@@ -113,8 +109,4 @@ go test ./internal/store
 pnpm docs:site && pnpm format:check && pnpm lint && pnpm test && pnpm build && git diff --check
 ```
 
-User-facing changes need docs and `CHANGELOG.md`. Use `committer` with explicit file paths.
-
-## Release
-
-Read `docs/release.md` before release work. Release is tag-driven; verify workflow state with `gh run list/view`. If a release workflow is cancelled or partially failed, state exactly which jobs completed and which did not.
+User-facing changes need docs and `CHANGELOG.md`.

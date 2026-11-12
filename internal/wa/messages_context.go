@@ -20,6 +20,9 @@ func contextInfoForMessage(m *waProto.Message) *waProto.ContextInfo {
 	if vid := m.GetVideoMessage(); vid != nil {
 		return vid.GetContextInfo()
 	}
+	if ptv := m.GetPtvMessage(); ptv != nil {
+		return ptv.GetContextInfo()
+	}
 	if aud := m.GetAudioMessage(); aud != nil {
 		return aud.GetContextInfo()
 	}
@@ -68,6 +71,12 @@ func contextInfoForMessage(m *waProto.Message) *waProto.ContextInfo {
 	if creation := pickPollCreation(m); creation != nil {
 		return creation.GetContextInfo()
 	}
+	if invite := m.GetGroupInviteMessage(); invite != nil {
+		return invite.GetContextInfo()
+	}
+	if alb := m.GetAlbumMessage(); alb != nil {
+		return alb.GetContextInfo()
+	}
 	return nil
 }
 
@@ -76,6 +85,12 @@ func displayTextForProto(m *waProto.Message) string {
 		return ""
 	}
 
+	if inner := contentWrapper(m); inner != nil {
+		return displayTextForProto(inner)
+	}
+	if invite := m.GetGroupInviteMessage(); invite != nil {
+		return groupInviteText(invite)
+	}
 	if img := m.GetImageMessage(); img != nil {
 		return "Sent image"
 	}
@@ -83,6 +98,9 @@ func displayTextForProto(m *waProto.Message) string {
 		if vid.GetGifPlayback() {
 			return "Sent gif"
 		}
+		return "Sent video"
+	}
+	if m.GetPtvMessage() != nil {
 		return "Sent video"
 	}
 	if aud := m.GetAudioMessage(); aud != nil {
@@ -160,4 +178,10 @@ func displayTextForProto(m *waProto.Message) string {
 		return tbr.GetSelectedDisplayText()
 	}
 	return ""
+}
+
+// MessageDisplayText returns the same compact message summary used for quoted
+// context during sync.
+func MessageDisplayText(m *waProto.Message) string {
+	return displayTextForProto(m)
 }

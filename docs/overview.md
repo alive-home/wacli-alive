@@ -2,7 +2,7 @@
 
 Read when: you need the user-facing command map, global flags, store model, or links to command-specific docs.
 
-`wacli` is a WhatsApp CLI built on `whatsmeow`. It pairs as a linked WhatsApp Web device, stores message metadata locally, supports offline search, and exposes send/media/group/contact workflows for scripts and humans. Named accounts let multiple WhatsApp identities use isolated stores via `--account`.
+`wacli` is a WhatsApp CLI built on `whatsmeow`. It pairs as a linked WhatsApp Web device, stores message metadata locally, supports offline search, and exposes media/group/contact reads for scripts and humans. This is a read-only build: it cannot send messages or change anything on WhatsApp, and running a command that would prints that it is not available. Named accounts let multiple WhatsApp identities use isolated stores via `--account`.
 
 ## Store and output
 
@@ -11,9 +11,12 @@ Read when: you need the user-facing command map, global flags, store model, or l
 - Override the store with `--store DIR` or `WACLI_STORE_DIR`.
 - Human-readable tables are the default.
 - Use `--json` for scriptable output.
+- Libsignal warnings and errors go to stderr, not stdout. With `--events`, they use NDJSON `warning` events with `data.code=libsignal_diagnostic`, the original `level`, `source`, `caller`, and a safe `message`. These diagnostics can precede a successful fallback and do not themselves mean the command failed.
+- Libsignal diagnostics retain known operation labels or safe error categories, redact dynamic details, and report unknown messages generically. Debug and info logging are disabled to avoid exposing cryptographic material; libsignal v0.2.2 has no production info calls.
+- A successful JSON command exits successfully if its pipe reader closes early. Other output errors and command failures still return a nonzero exit status.
 - Use `--full` to avoid table truncation.
 - Write commands acquire the store lock; use `--lock-wait DURATION` to wait.
-- Use `--read-only` or `WACLI_READONLY=1` to reject commands that write WhatsApp or local state.
+- Use `--read-only` or `WACLI_READONLY=1` to also reject commands that write local state.
 - Use `sync --max-messages`, `sync --max-db-size`, `WACLI_SYNC_MAX_MESSAGES`, or `WACLI_SYNC_MAX_DB_SIZE` to bound local history growth.
 - Use `store cleanup`, `chats cleanup`, and `groups prune` to preview and remove stale local rows after sync has already stored them.
 - Authenticated startup resolves historical `@lid` chat/message rows to phone-number JIDs when the WhatsApp session store has the mapping.
@@ -21,24 +24,21 @@ Read when: you need the user-facing command map, global flags, store model, or l
 
 ## Command pages
 
-- [auth](auth.md) - pair, inspect auth status, logout.
+- [auth](auth.md) - pair and inspect auth status.
 - [accounts](accounts.md) - create and select named account stores.
 - [sync](sync.md) - sync messages, contacts, groups, channels, and optional media.
 - [messages](messages.md) - list, search, show, and contextualize stored messages.
 - [calls](calls.md) - list stored WhatsApp call events.
-- [send](send.md) - send text, files, stickers, statuses, replies, and reactions.
 - [media](media.md) - download media attached to stored messages.
 - [contacts](contacts.md) - search contacts and manage local aliases/tags.
 - [contacts import-system](contacts-import-system.md) - import macOS Contacts names into local contact metadata.
-- [chats](chats.md) - list, show, filter, and manage known chat state.
-- [groups](groups.md) - refresh, inspect, rename, leave, join, invite, and manage participants.
+- [chats](chats.md) - list, show, and filter known chats.
+- [groups](groups.md) - refresh and inspect groups, participants, invite links, and join requests.
 - [store](store.md) - inspect local store stats and prune stale local rows.
-- [channels](channels.md) - list, inspect, join, leave, and send to WhatsApp Channels.
+- [channels](channels.md) - list and inspect WhatsApp Channels.
 - [history](history.md) - inspect archive coverage and request older per-chat history from the primary device.
-- [presence](presence.md) - send typing/paused indicators.
-- [profile](profile.md) - manage profile picture, About text, display name, and fetch profile metadata.
+- [profile](profile.md) - fetch profile metadata, About text, and business profiles.
 - [doctor](doctor.md) - diagnose store, auth, search, and optional live connectivity.
-- [docs](docs.md) - print the hosted documentation URL.
 - [version](version.md) - print the CLI version.
 - [completion](completion.md) - generate shell completion scripts.
 - [help](help.md) - inspect command help from the CLI.
@@ -50,17 +50,12 @@ Read when: you need the user-facing command map, global flags, store model, or l
 wacli auth
 wacli sync --follow
 wacli messages search "meeting"
-wacli send text --to mom --message "hello"
-wacli send status --message "available today"
+wacli messages list --chat mom --limit 20
 ```
 
 ## Recipient formats
 
 Commands that accept `PHONE_OR_JID` accept a WhatsApp JID like `1234567890@s.whatsapp.net`, a group JID like `123456789@g.us`, a channel JID like `123456789012345@newsletter`, or a phone number with common formatting such as `+1 (234) 567-8900`.
-
-`send text`, `send file`, `send sticker`, and `send voice` also accept synced contact, group, or chat names through `RECIPIENT`. If a name is ambiguous, interactive terminals prompt; scripts can use `--pick N`.
-
-`chats archive`, `chats pin`, `chats mute`, and `chats mark-read` use the same synced contact/group/chat resolver through `--chat`. Pass a raw JID when you need an exact target.
 
 ## History limits
 

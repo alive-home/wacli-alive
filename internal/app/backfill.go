@@ -3,12 +3,14 @@ package app
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	"github.com/openclaw/wacli/internal/store"
 	"go.mau.fi/whatsmeow/proto/waE2E"
 	"go.mau.fi/whatsmeow/proto/waHistorySync"
 	"go.mau.fi/whatsmeow/types"
@@ -60,7 +62,7 @@ func (a *App) BackfillHistory(ctx context.Context, opts BackfillOptions) (Backfi
 		return BackfillResult{}, err
 	}
 
-	if err := a.EnsureAuthed(); err != nil {
+	if err := a.EnsureAuthed(ctx); err != nil {
 		return BackfillResult{}, err
 	}
 	if err := a.OpenWA(); err != nil {
@@ -81,7 +83,7 @@ func (a *App) BackfillHistory(ctx context.Context, opts BackfillOptions) (Backfi
 			return
 		}
 		for _, conv := range hs.Data.GetConversations() {
-			if strings.TrimSpace(conv.GetID()) != chatStr {
+			if a.canonicalStoreJIDString(ctx, strings.TrimSpace(conv.GetID())) != a.canonicalStoreJID(ctx, chat).String() {
 				continue
 			}
 			mu.Lock()
@@ -102,10 +104,8 @@ func (a *App) BackfillHistory(ctx context.Context, opts BackfillOptions) (Backfi
 			return
 		}
 	}
-	handlerID := a.wa.AddEventHandler(func(evt interface{}) {
+	handlerID := a.wa.AddEventHandler(func(evt any) {
 		switch v := evt.(type) {
-		case *events.HistorySync:
-			handleOnDemand(v)
 		case *events.Message:
 			notif := historySyncNotificationFromMessage(v)
 			if notif == nil || notif.GetSyncType() != waE2E.HistorySyncType_ON_DEMAND {
@@ -132,12 +132,100 @@ func (a *App) BackfillHistory(ctx context.Context, opts BackfillOptions) (Backfi
 
 	var requestsSent int
 	var responsesSeen int
+	errResponseTimeout := errors.New("timed out waiting for on-demand history sync response")
+	request := func(ctx context.Context, anchor store.MessageInfo, requestChat types.JID) (onDemandResponse, error) {
+		if err := ctx.Err(); err != nil {
+			return onDemandResponse{}, err
+		}
+		ch := make(chan onDemandResponse, 4)
+		mu.Lock()
+		waitCh = ch
+		mu.Unlock()
+		defer func() {
+			mu.Lock()
+			waitCh = nil
+			mu.Unlock()
+		}()
+
+		storeChat := a.canonicalStoreJID(ctx, chat).String()
+		requestsSent++
+		a.emitOrPrint("backfill_requesting", map[string]any{
+			"chat_jid":         storeChat,
+			"request_chat_jid": requestChat.String(),
+			"count":            opts.Count,
+			"request":          requestsSent,
+			"anchor_msg_id":    anchor.MsgID,
+		}, "Requesting %d older messages for %s...\n", opts.Count, storeChat)
+		reqInfo := types.MessageInfo{
+			MessageSource: types.MessageSource{Chat: requestChat, IsFromMe: anchor.FromMe},
+			ID:            types.MessageID(anchor.MsgID),
+			Timestamp:     anchor.Timestamp,
+		}
+		if _, err := a.wa.RequestHistorySyncOnDemand(ctx, reqInfo, opts.Count); err != nil {
+			return onDemandResponse{}, err
+		}
+		timer := time.NewTimer(opts.WaitPerRequest)
+		defer timer.Stop()
+		select {
+		case <-ctx.Done():
+			return onDemandResponse{}, ctx.Err()
+		case resp := <-ch:
+			responsesSeen++
+			return resp, nil
+		case <-timer.C:
+			return onDemandResponse{}, fmt.Errorf("%w (anchor %s)", errResponseTimeout, anchor.MsgID)
+		}
+	}
+
+	// A mapped 1:1 chat has two identities. The primary device files some
+	// chats under the LID and others under the phone number, and answers only
+	// requests addressed to the one it uses (#444). Ask by LID first, retry the
+	// same anchor by phone number when that goes unanswered, and keep using
+	// the identity of the successful attempt. Late replies have no request ID,
+	// so either identity remains eligible for fallback in later batches. Resolve on every
+	// request: sync can learn a mapping while connecting.
+	var preferPN bool
+	requestIdentities := func(ctx context.Context) []types.JID {
+		lidChat := a.wa.ResolvePNToLID(ctx, chat)
+		pnChat := a.wa.ResolveLIDToPN(ctx, lidChat)
+		if pnChat == lidChat {
+			return []types.JID{lidChat}
+		}
+		if preferPN {
+			return []types.JID{pnChat, lidChat}
+		}
+		return []types.JID{lidChat, pnChat}
+	}
+	requestAnchor := func(ctx context.Context, anchor store.MessageInfo) (onDemandResponse, error) {
+		ids := requestIdentities(ctx)
+		resp, err := request(ctx, anchor, ids[0])
+		if len(ids) < 2 || !errors.Is(err, errResponseTimeout) || ctx.Err() != nil {
+			return resp, err
+		}
+		a.emitWarning("backfill_identity_retry",
+			fmt.Sprintf("warning: no history response for anchor %s from %s; retrying with %s", anchor.MsgID, ids[0], ids[1]),
+			map[string]any{
+				"chat_jid":               a.canonicalStoreJID(ctx, chat).String(),
+				"anchor_msg_id":          anchor.MsgID,
+				"request_chat_jid":       ids[0].String(),
+				"retry_request_chat_jid": ids[1].String(),
+			})
+		resp, err = request(ctx, anchor, ids[1])
+		if err == nil {
+			preferPN = ids[1].Server == types.DefaultUserServer
+		}
+		return resp, err
+	}
 
 	syncRes, err := a.Sync(ctx, SyncOptions{
-		Mode:     SyncModeOnce,
-		AllowQR:  false,
-		IdleExit: opts.IdleExit,
+		Mode:             SyncModeOnce,
+		AllowQR:          false,
+		IdleExit:         opts.IdleExit,
+		afterHistorySync: handleOnDemand,
 		AfterConnect: func(ctx context.Context) error {
+			// Sync can learn mappings and migrate old LID rows while connecting.
+			// Resolve the local identity only after that migration has completed.
+			chatStr := a.canonicalStoreJID(ctx, chat).String()
 			for i := 0; i < opts.Requests; i++ {
 				oldest, err := a.db.GetOldestMessageInfo(chatStr)
 				if err != nil {
@@ -147,45 +235,22 @@ func (a *App) BackfillHistory(ctx context.Context, opts BackfillOptions) (Backfi
 					return err
 				}
 
-				reqInfo := types.MessageInfo{
-					MessageSource: types.MessageSource{
-						Chat:     chat,
-						IsFromMe: oldest.FromMe,
-					},
-					ID:        types.MessageID(oldest.MsgID),
-					Timestamp: oldest.Timestamp,
+				resp, err := requestAnchor(ctx, oldest)
+				if errors.Is(err, errResponseTimeout) && ctx.Err() == nil {
+					next, nextErr := a.db.GetNextMessageInfo(chatStr, oldest.MsgID)
+					if nextErr != nil && !errors.Is(nextErr, sql.ErrNoRows) {
+						return nextErr
+					}
+					if nextErr == nil {
+						a.emitWarning("backfill_anchor_retry",
+							fmt.Sprintf("warning: no history response for anchor %s; retrying once with next local anchor %s", oldest.MsgID, next.MsgID),
+							map[string]any{"chat_jid": chatStr, "anchor_msg_id": oldest.MsgID, "retry_anchor_msg_id": next.MsgID})
+						resp, err = requestAnchor(ctx, next)
+					}
 				}
-
-				ch := make(chan onDemandResponse, 4)
-				mu.Lock()
-				waitCh = ch
-				mu.Unlock()
-
-				requestsSent++
-				a.emitOrPrint("backfill_requesting", map[string]any{
-					"chat_jid": chatStr,
-					"count":    opts.Count,
-					"request":  requestsSent,
-				}, "Requesting %d older messages for %s...\n", opts.Count, chatStr)
-				if _, err := a.wa.RequestHistorySyncOnDemand(ctx, reqInfo, opts.Count); err != nil {
+				if err != nil {
 					return err
 				}
-
-				var resp onDemandResponse
-				select {
-				case <-ctx.Done():
-					return ctx.Err()
-				case resp = <-ch:
-					responsesSeen++
-				case <-time.After(opts.WaitPerRequest):
-					return fmt.Errorf("timed out waiting for on-demand history sync response")
-				}
-
-				mu.Lock()
-				if waitCh == ch {
-					waitCh = nil
-				}
-				mu.Unlock()
 
 				a.emitOrPrint("backfill_response", map[string]any{
 					"chat_jid":       chatStr,
@@ -195,6 +260,7 @@ func (a *App) BackfillHistory(ctx context.Context, opts BackfillOptions) (Backfi
 				}, "On-demand history sync: %d conversations, %d messages.\n", resp.conversations, resp.messages)
 
 				newOldest, err := a.db.GetOldestMessageInfo(chatStr)
+				// A retry's newer anchor is not progress past the original oldest row.
 				if err == nil && newOldest.MsgID == oldest.MsgID {
 					a.emitOrPrint("backfill_stopped", map[string]any{
 						"chat_jid": chatStr,
@@ -227,7 +293,7 @@ func (a *App) BackfillHistory(ctx context.Context, opts BackfillOptions) (Backfi
 	afterCount, _ := a.db.CountMessages()
 
 	return BackfillResult{
-		ChatJID:        chatStr,
+		ChatJID:        a.canonicalStoreJID(ctx, chat).String(),
 		RequestsSent:   requestsSent,
 		ResponsesSeen:  responsesSeen,
 		MessagesAdded:  afterCount - beforeCount,

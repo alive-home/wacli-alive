@@ -102,6 +102,18 @@ ON CONFLICT(jid) DO UPDATE SET
     business_name=COALESCE(NULLIF(excluded.business_name,''), contacts.business_name),
     updated_at=excluded.updated_at;
 
+-- name: SetContactActionName :exec
+INSERT INTO contacts(jid, phone, full_name, first_name, updated_at)
+VALUES (?, ?, ?, ?, ?)
+ON CONFLICT(jid) DO UPDATE SET
+    phone=COALESCE(NULLIF(excluded.phone,''), contacts.phone),
+    full_name=excluded.full_name,
+    first_name=excluded.first_name,
+    updated_at=excluded.updated_at;
+
+-- name: ClearContactActionName :exec
+UPDATE contacts SET full_name = NULL, first_name = NULL, updated_at = ? WHERE jid = ?;
+
 -- name: SetAlias :exec
 INSERT INTO contact_aliases(jid, alias, notes, updated_at)
 VALUES (?, ?, NULL, ?)
@@ -158,6 +170,16 @@ DELETE FROM group_participants WHERE group_jid = ?;
 -- name: InsertGroupParticipant :exec
 INSERT INTO group_participants(group_jid, user_jid, role, updated_at)
 VALUES(?, ?, ?, ?);
+
+-- name: ListGroupParticipants :many
+SELECT group_jid, user_jid, COALESCE(role, 'member') AS role, updated_at
+FROM group_participants
+WHERE group_jid = ?
+ORDER BY CASE role
+    WHEN 'superadmin' THEN 1
+    WHEN 'admin' THEN 2
+    ELSE 3
+END, user_jid ASC;
 
 -- name: DeleteGroup :exec
 DELETE FROM groups WHERE jid = ?;
@@ -298,6 +320,15 @@ WHERE m.chat_jid = ?
 ORDER BY m.ts DESC, m.rowid DESC
 LIMIT 1;
 
+-- name: GetNextMessageInfo :one
+SELECT m.chat_jid, m.msg_id, m.ts, m.from_me, COALESCE(m.sender_jid,''), COALESCE(m.sender_name,'')
+FROM messages m
+JOIN messages anchor ON anchor.chat_jid = m.chat_jid
+WHERE anchor.chat_jid = ? AND anchor.msg_id = ?
+  AND (m.ts, m.rowid) > (anchor.ts, anchor.rowid)
+ORDER BY m.ts ASC, m.rowid ASC
+LIMIT 1;
+
 -- name: MessageContextBefore :many
 SELECT m.rowid, m.chat_jid, COALESCE(c.name,''), m.msg_id, COALESCE(m.sender_jid,''), COALESCE(m.sender_name,''), m.ts, m.from_me, COALESCE(m.text,''), COALESCE(m.display_text,''), COALESCE(m.quoted_msg_id,''), COALESCE(m.quoted_sender_jid,''), m.is_forwarded, m.forwarding_score, COALESCE(m.reaction_to_id,''), COALESCE(m.reaction_emoji,''), COALESCE(m.media_type,''), COALESCE(m.media_caption,''), COALESCE(m.filename,''), COALESCE(m.mime_type,''), COALESCE(m.direct_path,''), COALESCE(m.local_path,''), COALESCE(m.downloaded_at,0), CASE WHEN s.msg_id IS NULL THEN 0 ELSE 1 END, COALESCE(s.starred_at,0), m.revoked, m.deleted_for_me, COALESCE(m.deleted_at,0), COALESCE(m.deletion_reason,''), COALESCE(m.payload_purged_at,0), m.edited, COALESCE(m.buttons,''), ''
 FROM messages m
@@ -380,6 +411,7 @@ WHERE COALESCE(m.media_type,'') != ''
   AND m.deleted_at IS NULL
   AND m.media_unavailable_at IS NULL
   AND (sqlc.arg(chat_jid) = '' OR m.chat_jid = sqlc.arg(chat_jid))
+  AND (sqlc.arg(media_type) = '' OR m.media_type = sqlc.arg(media_type))
 ORDER BY m.ts DESC, m.rowid DESC
 LIMIT CASE WHEN sqlc.arg(limit_count) <= 0 THEN -1 ELSE sqlc.arg(limit_count) END;
 
@@ -394,6 +426,7 @@ WHERE COALESCE(m.media_type,'') != ''
   AND m.media_unavailable_at IS NULL
   AND m.ts < sqlc.arg(before_ts)
   AND (sqlc.arg(chat_jid) = '' OR m.chat_jid = sqlc.arg(chat_jid))
+  AND (sqlc.arg(media_type) = '' OR m.media_type = sqlc.arg(media_type))
 ORDER BY m.ts DESC, m.rowid DESC
 LIMIT CASE WHEN sqlc.arg(limit_count) <= 0 THEN -1 ELSE sqlc.arg(limit_count) END;
 
@@ -455,10 +488,6 @@ ON CONFLICT(chat_jid, poll_msg_id, voter_jid) DO UPDATE SET
     selected_options_json = excluded.selected_options_json,
     ts = excluded.ts
 WHERE excluded.ts >= poll_votes.ts;
-
--- name: DeletePollVote :exec
-DELETE FROM poll_votes
-WHERE chat_jid = ? AND poll_msg_id = ? AND voter_jid = ? AND ts <= ?;
 
 -- name: ListPollVotes :many
 SELECT pv.chat_jid, pv.poll_msg_id, pv.voter_jid, pv.vote_msg_id, pv.selected_options_json, pv.ts

@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -14,40 +15,56 @@ import (
 var ErrMessageNotTombstoned = errors.New("message is not tombstoned")
 
 type UpsertMessageParams struct {
-	ChatJID         string
-	ChatName        string
-	MsgID           string
-	SenderJID       string
-	SenderName      string
-	Timestamp       time.Time
-	FromMe          bool
-	Text            string
-	DisplayText     string
-	QuotedMsgID     string
-	QuotedSenderJID string
-	Buttons         []Button
-	IsForwarded     bool
-	ForwardingScore uint32
-	ReactionToID    string
-	ReactionEmoji   string
-	MediaType       string
-	MediaCaption    string
-	Filename        string
-	MimeType        string
-	DirectPath      string
-	MediaKey        []byte
-	FileSHA256      []byte
-	FileEncSHA256   []byte
-	FileLength      uint64
-	Edited          bool
-	Revoked         bool
-	DeletedForMe    bool
-	DeletedAt       time.Time
-	DeletionReason  string
+	ArchiveIncoming          bool
+	ArchiveObservedMS        int64
+	ArchiveSettingObservedMS int64
+	ChatJID                  string
+	ChatName                 string
+	MsgID                    string
+	SenderJID                string
+	SenderName               string
+	Timestamp                time.Time
+	FromMe                   bool
+	Text                     string
+	DisplayText              string
+	QuotedMsgID              string
+	QuotedSenderJID          string
+	Buttons                  []Button
+	IsForwarded              bool
+	ForwardingScore          uint32
+	ReactionToID             string
+	ReactionEmoji            string
+	MediaType                string
+	MediaCaption             string
+	Filename                 string
+	MimeType                 string
+	DirectPath               string
+	MediaKey                 []byte
+	FileSHA256               []byte
+	FileEncSHA256            []byte
+	FileLength               uint64
+	Edited                   bool
+	Revoked                  bool
+	DeletedForMe             bool
+	DeletedAt                time.Time
+	DeletionReason           string
+	// SkipOwnReadMark keeps a FromMe row from marking the chat read. Set it for
+	// rows that are not replies, such as calls and poll votes.
+	SkipOwnReadMark bool
 }
 
-func messageSelectColumns(snippet string) string {
-	return fmt.Sprintf(`m.rowid, m.chat_jid, COALESCE(c.name,''), m.msg_id, COALESCE(m.sender_jid,''), COALESCE(m.sender_name,''), m.ts, m.from_me, COALESCE(m.text,''), COALESCE(m.display_text,''), COALESCE(m.quoted_msg_id,''), COALESCE(m.quoted_sender_jid,''), m.is_forwarded, m.forwarding_score, COALESCE(m.reaction_to_id,''), COALESCE(m.reaction_emoji,''), COALESCE(m.media_type,''), COALESCE(m.media_caption,''), COALESCE(m.filename,''), COALESCE(m.mime_type,''), COALESCE(m.direct_path,''), COALESCE(m.local_path,''), COALESCE(m.downloaded_at,0), CASE WHEN s.msg_id IS NULL THEN 0 ELSE 1 END, COALESCE(s.starred_at,0), m.revoked, m.deleted_for_me, COALESCE(m.deleted_at,0), COALESCE(m.deletion_reason,''), COALESCE(m.payload_purged_at,0), m.edited, COALESCE(m.buttons,''), %s`, snippetSQL(snippet))
+func (d *DB) messageSelectColumns(snippet string) string {
+	return fmt.Sprintf(`m.rowid, m.chat_jid, COALESCE(c.name,''), m.msg_id, COALESCE(m.sender_jid,''), COALESCE(m.sender_name,''), m.ts, m.from_me, COALESCE(m.text,''), COALESCE(m.display_text,''), COALESCE(m.quoted_msg_id,''), COALESCE(m.quoted_sender_jid,''), m.is_forwarded, m.forwarding_score, COALESCE(m.reaction_to_id,''), COALESCE(m.reaction_emoji,''), COALESCE(m.media_type,''), COALESCE(m.media_caption,''), COALESCE(m.filename,''), COALESCE(m.mime_type,''), COALESCE(m.direct_path,''), COALESCE(m.local_path,''), COALESCE(m.downloaded_at,0), CASE WHEN s.msg_id IS NULL THEN 0 ELSE 1 END, COALESCE(s.starred_at,0), m.revoked, m.deleted_for_me, COALESCE(m.deleted_at,0), COALESCE(m.deletion_reason,''), COALESCE(m.payload_purged_at,0), m.edited, COALESCE(m.buttons,''), %s, %s`, d.receiptColumns(), snippetSQL(snippet))
+}
+
+// receiptColumns counts, per message, how many recipients have it and how many
+// have read it. A store from before the receipt table answers zero to both.
+func (d *DB) receiptColumns() string {
+	if !d.receiptsEnabled {
+		return "0, 0"
+	}
+	return `(SELECT COUNT(*) FROM message_receipts r WHERE r.chat_jid = m.chat_jid AND r.msg_id = m.msg_id), ` +
+		`(SELECT COUNT(*) FROM message_receipts r WHERE r.chat_jid = m.chat_jid AND r.msg_id = m.msg_id AND r.status IN ('read','played'))`
 }
 
 func snippetSQL(snippet string) string {
@@ -88,15 +105,17 @@ func (d *DB) UpsertMessage(p UpsertMessageParams) error {
 	if p.Edited {
 		editedTS = unix(p.Timestamp)
 	}
-	return d.q.UpsertMessage(storeCtx(), storedb.UpsertMessageParams{
-		ChatJid:         p.ChatJID,
-		ChatName:        nullString(p.ChatName),
-		MsgID:           p.MsgID,
-		SenderJid:       nullString(p.SenderJID),
-		SenderName:      nullString(p.SenderName),
-		Ts:              unix(p.Timestamp),
-		FromMe:          boolToInt64(p.FromMe),
-		Text:            nullString(p.Text),
+	params := storedb.UpsertMessageParams{
+		ChatJid:    p.ChatJID,
+		ChatName:   nullString(p.ChatName),
+		MsgID:      p.MsgID,
+		SenderJid:  nullString(p.SenderJID),
+		SenderName: nullString(p.SenderName),
+		Ts:         unix(p.Timestamp),
+		FromMe:     boolToInt64(p.FromMe),
+		// Raw message content must match the conversation, including surrounding
+		// whitespace. Keep normalization confined to display fields and names.
+		Text:            nullStringIfEmpty(p.Text),
 		DisplayText:     nullString(p.DisplayText),
 		QuotedMsgID:     nullString(p.QuotedMsgID),
 		QuotedSenderJid: nullString(p.QuotedSenderJID),
@@ -105,7 +124,7 @@ func (d *DB) UpsertMessage(p UpsertMessageParams) error {
 		ReactionToID:    nullString(p.ReactionToID),
 		ReactionEmoji:   nullString(p.ReactionEmoji),
 		MediaType:       nullString(p.MediaType),
-		MediaCaption:    nullString(p.MediaCaption),
+		MediaCaption:    nullStringIfEmpty(p.MediaCaption),
 		Filename:        nullString(p.Filename),
 		MimeType:        nullString(p.MimeType),
 		DirectPath:      nullString(p.DirectPath),
@@ -122,7 +141,71 @@ func (d *DB) UpsertMessage(p UpsertMessageParams) error {
 		Buttons:         buttonsJSON,
 		ChatJid_2:       strings.TrimSpace(p.ChatJID),
 		MsgID_2:         strings.TrimSpace(p.MsgID),
-	})
+	}
+	markRead := p.marksChatRead()
+	if !p.ArchiveIncoming && !markRead {
+		return d.q.UpsertMessage(storeCtx(), params)
+	}
+	tx, err := d.sql.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	// Decide and write under the writer lock before reading message state.
+	// A deferred read-then-write transaction can fail with SQLITE_BUSY_SNAPSHOT.
+	if p.ArchiveIncoming {
+		if err := recordChatArchiveIncoming(tx, p.ChatJID, p.MsgID, p.Timestamp, p.ArchiveObservedMS, p.ArchiveSettingObservedMS, false); err != nil {
+			return err
+		}
+	} else if _, err := tx.ExecContext(storeCtx(), `UPDATE chats SET unread = unread WHERE jid = ?`, p.ChatJID); err != nil {
+		return err
+	}
+	if markRead {
+		stored, err := ownReplyStored(tx, p.ChatJID, p.MsgID)
+		if err != nil {
+			return err
+		}
+		markRead = !stored
+	}
+	if err := d.q.WithTx(tx).UpsertMessage(storeCtx(), params); err != nil {
+		return err
+	}
+	if markRead {
+		if err := clearChatUnreadThrough(tx, p.ChatJID, p.Timestamp, []string{p.MsgID}, true); err != nil {
+			return err
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	return nil
+}
+
+// marksChatRead reports whether storing this row means the account answered the
+// chat. Only a real message from this account counts: reactions, edits,
+// deletions and contentless protocol rows do not, mirroring which incoming rows
+// are readable. SkipOwnReadMark opts a row out (calls, votes).
+func (p UpsertMessageParams) marksChatRead() bool {
+	return p.FromMe && !p.SkipOwnReadMark && !p.Timestamp.IsZero() &&
+		strings.TrimSpace(p.ChatJID) != "" &&
+		!p.Edited && !p.Revoked && !p.DeletedForMe && p.DeletedAt.IsZero() &&
+		strings.TrimSpace(p.ReactionToID) == "" && strings.TrimSpace(p.ReactionEmoji) == "" &&
+		(p.DisplayText != "(message)" || strings.TrimSpace(p.Text) != "")
+}
+
+// ownReplyStored reports whether this message ID is already stored as a reply.
+// Re-storing it (replay, retry, backfill) must not clear an unread marker or
+// count that was set after the original reply.
+func ownReplyStored(db interface {
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+}, chatJID, msgID string) (bool, error) {
+	var one int
+	// A tombstone is proof of prior processing even after its payload is purged.
+	err := db.QueryRowContext(storeCtx(), `SELECT 1 FROM messages WHERE chat_jid = ? AND msg_id = ? AND from_me = 1 AND (revoked != 0 OR deleted_for_me != 0 OR deleted_at IS NOT NULL OR (COALESCE(reaction_to_id,'') = '' AND COALESCE(reaction_emoji,'') = '' AND (COALESCE(display_text,'') != '(message)' OR TRIM(COALESCE(text,'')) != '')))`, strings.TrimSpace(chatJID), strings.TrimSpace(msgID)).Scan(&one)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	return err == nil, err
 }
 
 func (d *DB) MarkMessageRevoked(chatJID, msgID string) error {
@@ -251,7 +334,8 @@ func (d *DB) MessageLocalMediaPaths(chatJID, msgID string) ([]string, error) {
 
 func (d *DB) UpdateMessageText(chatJID, msgID, text string) error {
 	n, err := d.q.UpdateMessageText(storeCtx(), storedb.UpdateMessageTextParams{
-		Text:        nullString(text),
+		// Explicit edits need the same raw-content preservation as sync upserts.
+		Text:        nullStringIfEmpty(text),
 		DisplayText: nullString(text),
 		ChatJid:     strings.TrimSpace(chatJID),
 		MsgID:       strings.TrimSpace(msgID),
@@ -353,6 +437,7 @@ func (d *DB) PurgeMessage(chatJID, msgID string) error {
 }
 
 type ListMessagesParams struct {
+	key       *messagePageKey
 	ChatJID   string
 	ChatJIDs  []string
 	SenderJID string
@@ -369,46 +454,80 @@ func (d *DB) ListMessages(p ListMessagesParams) ([]Message, error) {
 	if p.Limit <= 0 {
 		p.Limit = 50
 	}
-	query := `
-		SELECT ` + messageSelectColumns("") + `
+	const from = `
 		FROM messages m
 		LEFT JOIN chats c ON c.jid = m.chat_jid
 		LEFT JOIN starred s ON s.chat_jid = m.chat_jid AND s.msg_id = m.msg_id
 		WHERE m.deleted_at IS NULL`
-	var args []interface{}
-	query, args = appendStringFilter(query, args, "m.chat_jid", p.ChatJID, p.ChatJIDs)
-	if p.After != nil {
-		query += " AND m.ts > ?"
-		args = append(args, unix(*p.After))
-	}
-	if p.Before != nil {
-		query += " AND m.ts < ?"
-		args = append(args, unix(*p.Before))
-	}
-	if strings.TrimSpace(p.SenderJID) != "" {
-		query += " AND m.sender_jid = ?"
-		args = append(args, strings.TrimSpace(p.SenderJID))
-	}
-	if p.FromMe != nil {
-		query += " AND m.from_me = ?"
-		args = append(args, boolToInt(*p.FromMe))
-	}
-	if p.Forwarded {
-		query += " AND m.is_forwarded = 1"
-	}
-	if p.Starred {
-		query += " AND s.msg_id IS NOT NULL"
-	}
+	filter, filterArgs := p.messageFilter()
+	order := " ORDER BY m.ts DESC, m.rowid DESC"
 	if p.Asc {
-		query += " ORDER BY m.ts ASC, m.rowid ASC LIMIT ?"
-	} else {
-		query += " ORDER BY m.ts DESC, m.rowid DESC LIMIT ?"
+		order = " ORDER BY m.ts ASC, m.rowid ASC"
 	}
+	query := `SELECT ` + d.messageSelectColumns("") + from
+	var args []any
+	if chats := uniqueNonEmptyStrings(append([]string{p.ChatJID}, p.ChatJIDs...)); len(chats) > 1 {
+		// One chat under several JIDs (a phone number and its LID): take each
+		// JID's first rows through idx_messages_chat_ts and order only those.
+		// With "chat_jid IN (...)" SQLite reads and sorts every message of the
+		// chat, and computes each one's columns, to return the first few.
+		parts := make([]string, 0, len(chats))
+		for _, chat := range chats {
+			parts = append(parts, `SELECT rid FROM (SELECT m.rowid AS rid`+from+` AND m.chat_jid = ?`+filter+order+` LIMIT ?)`)
+			args = append(args, chat)
+			args = append(args, filterArgs...)
+			args = append(args, p.Limit)
+		}
+		query += ` AND m.rowid IN (` + strings.Join(parts, ` UNION ALL `) + `)`
+	} else {
+		query, args = appendStringFilter(query, args, "m.chat_jid", p.ChatJID, p.ChatJIDs)
+		query += filter
+		args = append(args, filterArgs...)
+	}
+	query += order + " LIMIT ?"
 	args = append(args, p.Limit)
 	return d.scanMessages(query, args...)
 }
 
-func appendStringFilter(query string, args []interface{}, column, value string, values []string) (string, []interface{}) {
+// messageFilter is the part of ListMessages' WHERE clause that does not name
+// a chat.
+func (p ListMessagesParams) messageFilter() (string, []any) {
+	var filter string
+	var args []any
+	if p.key != nil {
+		op := "<"
+		if p.Asc {
+			op = ">"
+		}
+		filter += " AND (m.ts" + op + "? OR (m.ts=? AND m.rowid" + op + "?))"
+		args = append(args, p.key.ts, p.key.ts, p.key.row)
+	}
+	if p.After != nil {
+		filter += " AND m.ts > ?"
+		args = append(args, unix(*p.After))
+	}
+	if p.Before != nil {
+		filter += " AND m.ts < ?"
+		args = append(args, unix(*p.Before))
+	}
+	if strings.TrimSpace(p.SenderJID) != "" {
+		filter += " AND m.sender_jid = ?"
+		args = append(args, strings.TrimSpace(p.SenderJID))
+	}
+	if p.FromMe != nil {
+		filter += " AND m.from_me = ?"
+		args = append(args, boolToInt(*p.FromMe))
+	}
+	if p.Forwarded {
+		filter += " AND m.is_forwarded = 1"
+	}
+	if p.Starred {
+		filter += " AND s.msg_id IS NOT NULL"
+	}
+	return filter, args
+}
+
+func appendStringFilter(query string, args []any, column, value string, values []string) (string, []any) {
 	filterValues := uniqueNonEmptyStrings(append([]string{value}, values...))
 	switch len(filterValues) {
 	case 0:
@@ -479,6 +598,25 @@ func (d *DB) GetLatestMessageInfo(chatJID string) (MessageInfo, error) {
 	return messageInfoFromLatestRow(row), nil
 }
 
+func (d *DB) GetNextMessageInfo(chatJID, msgID string) (MessageInfo, error) {
+	chatJID = strings.TrimSpace(chatJID)
+	if chatJID == "" {
+		return MessageInfo{}, fmt.Errorf("chat JID is required")
+	}
+	row, err := d.q.GetNextMessageInfo(storeCtx(), storedb.GetNextMessageInfoParams{ChatJid: chatJID, MsgID: msgID})
+	if err != nil {
+		return MessageInfo{}, err
+	}
+	return MessageInfo{
+		ChatJID:    row.ChatJid,
+		MsgID:      row.MsgID,
+		Timestamp:  fromUnix(row.Ts),
+		FromMe:     row.FromMe != 0,
+		SenderJID:  row.SenderJid,
+		SenderName: row.SenderName,
+	}, nil
+}
+
 func (d *DB) MessageContext(chatJID, msgID string, before, after int) ([]Message, error) {
 	if before < 0 {
 		before = 0
@@ -533,13 +671,16 @@ func (d *DB) MessageContext(chatJID, msgID string, before, after int) ([]Message
 	return out, nil
 }
 
-func (d *DB) scanMessages(query string, args ...interface{}) ([]Message, error) {
-	rows, err := d.sql.Query(query, args...)
+func (d *DB) scanMessages(query string, args ...any) ([]Message, error) {
+	return scanMessagesFrom(d.readQuery(), false, query, args...)
+}
+
+func scanMessagesFrom(db queryRows, ranked bool, query string, args ...any) ([]Message, error) {
+	rows, err := db.Query(query, args...)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-
 	var out []Message
 	for rows.Next() {
 		var m Message
@@ -557,7 +698,11 @@ func (d *DB) scanMessages(query string, args ...interface{}) ([]Message, error) 
 		var payloadPurgedAt int64
 		var buttonsJSON string
 		var edited int
-		if err := rows.Scan(&m.rowID, &m.ChatJID, &m.ChatName, &m.MsgID, &m.SenderJID, &m.SenderName, &ts, &fromMe, &m.Text, &m.DisplayText, &m.QuotedMsgID, &m.QuotedSenderJID, &forwarded, &forwardingScore, &m.ReactionToID, &m.ReactionEmoji, &m.MediaType, &m.MediaCaption, &m.Filename, &m.MimeType, &m.DirectPath, &m.LocalPath, &downloadedAt, &starred, &starredAt, &revoked, &deletedForMe, &deletedAt, &deletionReason, &payloadPurgedAt, &edited, &buttonsJSON, &m.Snippet); err != nil {
+		dest := []any{&m.rowID, &m.ChatJID, &m.ChatName, &m.MsgID, &m.SenderJID, &m.SenderName, &ts, &fromMe, &m.Text, &m.DisplayText, &m.QuotedMsgID, &m.QuotedSenderJID, &forwarded, &forwardingScore, &m.ReactionToID, &m.ReactionEmoji, &m.MediaType, &m.MediaCaption, &m.Filename, &m.MimeType, &m.DirectPath, &m.LocalPath, &downloadedAt, &starred, &starredAt, &revoked, &deletedForMe, &deletedAt, &deletionReason, &payloadPurgedAt, &edited, &buttonsJSON, &m.DeliveredTo, &m.ReadBy, &m.Snippet}
+		if ranked {
+			dest = append(dest, &m.rank)
+		}
+		if err := rows.Scan(dest...); err != nil {
 			return nil, err
 		}
 		m.Timestamp = fromUnix(ts)

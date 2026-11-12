@@ -7,17 +7,20 @@ import (
 )
 
 type envelope struct {
-	Success bool        `json:"success"`
-	Data    interface{} `json:"data"`
-	Error   *string     `json:"error"`
+	Success bool    `json:"success"`
+	Data    any     `json:"data"`
+	Error   *string `json:"error"`
 }
 
-func WriteJSON(w io.Writer, data interface{}) error {
+func WriteJSON(w io.Writer, data any) error {
 	b, err := json.Marshal(envelope{Success: true, Data: data})
 	if err != nil {
 		return err
 	}
 	_, err = fmt.Fprintln(w, string(b))
+	if isPlatformBrokenPipe(err) {
+		return nil
+	}
 	return err
 }
 

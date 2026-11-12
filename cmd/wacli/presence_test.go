@@ -10,10 +10,11 @@ import (
 	"os"
 	"os/exec"
 	"runtime"
-	"strings"
 	"testing"
 	"time"
 
+	"github.com/openclaw/wacli/internal/app"
+	"github.com/openclaw/wacli/internal/delegate"
 	"go.mau.fi/whatsmeow/types"
 )
 
@@ -100,18 +101,6 @@ func TestPresenceDelegateHelper(t *testing.T) {
 	}
 }
 
-func TestExecuteDelegatedSendRoutesPresenceValidation(t *testing.T) {
-	_, err := executeDelegatedSend(contextWithTestTimeout(t), nil, sendDelegateRequest{
-		Version:       sendDelegateVersion,
-		Kind:          "presence",
-		To:            "+15551234567",
-		PresenceState: "available",
-	})
-	if err == nil || !strings.Contains(err.Error(), "unsupported presence state") {
-		t.Fatalf("executeDelegatedSend error = %v, want presence state validation", err)
-	}
-}
-
 func TestSendPresenceWithRetryReconnectsOnNotConnected(t *testing.T) {
 	var sends int
 	var reconnects int
@@ -136,6 +125,81 @@ func TestSendPresenceWithRetryReconnectsOnNotConnected(t *testing.T) {
 	}
 }
 
+type fakePresenceWatchApp struct {
+	jid   types.JID
+	wait  time.Duration
+	state *app.PresenceState
+	err   error
+}
+
+func (f *fakePresenceWatchApp) WatchPresence(_ context.Context, jid types.JID, wait time.Duration) (*app.PresenceState, error) {
+	f.jid, f.wait = jid, wait
+	return f.state, f.err
+}
+
+func TestExecuteDelegatedPresenceSubscribe(t *testing.T) {
+	online := &app.PresenceState{JID: "15551234567@s.whatsapp.net", Online: true}
+	fake := &fakePresenceWatchApp{state: online}
+	resp, err := executeDelegatedPresenceSubscribe(contextWithTestTimeout(t), fake, sendDelegateRequest{
+		Kind: presenceSubscribeKind, To: "+1 (555) 123-4567", PresenceWaitMS: 2500,
+	})
+	if err != nil {
+		t.Fatalf("executeDelegatedPresenceSubscribe: %v", err)
+	}
+	if fake.jid.String() != "15551234567@s.whatsapp.net" || fake.wait != 2500*time.Millisecond {
+		t.Fatalf("watched %s for %s, want 15551234567@s.whatsapp.net for 2.5s", fake.jid, fake.wait)
+	}
+	if !resp.OK || resp.To != "15551234567@s.whatsapp.net" || resp.Presence != online {
+		t.Fatalf("response = %+v", resp)
+	}
+
+	if _, err := executeDelegatedPresenceSubscribe(contextWithTestTimeout(t), fake, sendDelegateRequest{
+		Kind: presenceSubscribeKind, To: "+15551234567", PresenceWaitMS: -1,
+	}); err == nil {
+		t.Fatalf("a negative wait was accepted")
+	}
+	quiet := &fakePresenceWatchApp{err: app.ErrPresenceQuiet}
+	if _, err := executeDelegatedPresenceSubscribe(contextWithTestTimeout(t), quiet, sendDelegateRequest{
+		Kind: presenceSubscribeKind, To: "+15551234567",
+	}); !errors.Is(err, app.ErrPresenceQuiet) {
+		t.Fatalf("error = %v, want the quiet sync's refusal", err)
+	}
+}
+
+// A presence subscription can wait seconds for WhatsApp's answer. It must not
+// queue behind a send that holds the delegate's send slot (a large upload), nor
+// take that slot itself.
+func TestPresenceSubscribeIsNotQueuedBehindSends(t *testing.T) {
+	serverConn, clientConn := net.Pipe()
+	defer clientConn.Close()
+	if err := clientConn.SetDeadline(time.Now().Add(2 * time.Second)); err != nil {
+		t.Fatalf("set client deadline: %v", err)
+	}
+
+	sendSlot := make(chan struct{}, 1) // empty: a send is in progress and owns it
+	executed := make(chan sendDelegateRequest, 1)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		handleSendDelegateConn(context.Background(), serverConn, func(_ context.Context, req sendDelegateRequest) (sendDelegateResponse, error) {
+			executed <- req
+			return sendDelegateResponse{OK: true, To: req.To}, nil
+		}, sendSlot, newSendPacer(sendSpacing{}))
+	}()
+
+	if err := json.NewEncoder(clientConn).Encode(sendDelegateRequest{Version: sendDelegateVersion, Kind: presenceSubscribeKind, To: "x"}); err != nil {
+		t.Fatalf("encode request: %v", err)
+	}
+	var resp sendDelegateResponse
+	if err := json.NewDecoder(clientConn).Decode(&resp); err != nil {
+		t.Fatalf("decode response (queued behind the send?): %v", err)
+	}
+	if !resp.OK || len(executed) != 1 {
+		t.Fatalf("response = %+v, executed %d", resp, len(executed))
+	}
+	<-done
+}
+
 type presenceDelegateTestServer struct {
 	requests chan presenceDelegateTestRequest
 	stop     func()
@@ -148,13 +212,9 @@ type presenceDelegateTestRequest struct {
 
 func startPresenceDelegateTestSocket(t *testing.T, storeDir string, respond func(sendDelegateRequest) sendDelegateResponse) *presenceDelegateTestServer {
 	t.Helper()
-	ln, err := net.Listen("unix", sendDelegateSocketPath(storeDir))
+	ln, err := delegate.Listen(storeDir)
 	if err != nil {
 		t.Fatalf("listen delegate socket: %v", err)
-	}
-	if err := os.Chmod(sendDelegateSocketPath(storeDir), 0o600); err != nil {
-		_ = ln.Close()
-		t.Fatalf("chmod delegate socket: %v", err)
 	}
 	requests := make(chan presenceDelegateTestRequest, 1)
 	done := make(chan struct{})
@@ -181,7 +241,6 @@ func startPresenceDelegateTestSocket(t *testing.T, storeDir string, respond func
 		stop: func() {
 			_ = ln.Close()
 			<-done
-			_ = os.Remove(sendDelegateSocketPath(storeDir))
 		},
 	}
 }

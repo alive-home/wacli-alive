@@ -31,11 +31,17 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
+// maxSendFileSize is the default upload cap. The whole file is read into memory
+// before upload, so it stays conservative; `send file --max-size-mb` raises it
+// per send up to maxSendFileSizeLimit, WhatsApp's own limit for documents.
 const maxSendFileSize = 100 * 1024 * 1024
+const maxSendFileSizeLimit int64 = 2048 * 1024 * 1024
 const imageThumbnailMaxDimension = 96
 const imageThumbnailMaxPixels = 40_000_000
 const voiceWaveformSamples = 64
 const voiceWaveformMax = 100
+const voiceWaveformSampleRate = 8000
+const maxWaveformPCMBytes = 2 << 20 // 2 MiB of 8 kHz s16le is ~131s of PCM
 
 const sendMediaTypeAuto = "auto"
 
@@ -47,6 +53,8 @@ type sendFileOptions struct {
 	replyTo       string
 	replyToSender string
 	ptt           bool
+	// maxSize is the upload cap in bytes; 0 means maxSendFileSize.
+	maxSize int64
 }
 
 type voiceNoteMetadata struct {
@@ -75,7 +83,11 @@ func sendFile(ctx context.Context, a interface {
 	}
 	opts.mediaAs = mediaAs
 
-	data, err := readSendFileData(filePath)
+	maxSize, err := resolveSendFileMaxSize(opts.maxSize)
+	if err != nil {
+		return sendFileOutcome{}, err
+	}
+	data, err := readSendFileDataLimited(filePath, maxSize)
 	if err != nil {
 		return sendFileOutcome{}, err
 	}
@@ -101,6 +113,15 @@ func sendFile(ctx context.Context, a interface {
 	if isNewsletter && (strings.TrimSpace(opts.replyTo) != "" || strings.TrimSpace(opts.replyToSender) != "") {
 		return sendFileOutcome{}, fmt.Errorf("quoted file replies are not supported for channels")
 	}
+	// Quote before uploading, so a message that cannot be quoted is refused
+	// without spending an upload.
+	var replyContext *waProto.ContextInfo
+	if !isNewsletter {
+		replyContext, err = buildReplyContextInfo(ctx, a.WA(), a.DB(), to, opts.replyTo, opts.replyToSender)
+		if err != nil {
+			return sendFileOutcome{}, err
+		}
+	}
 
 	var up whatsmeow.UploadResponse
 	if isNewsletter {
@@ -114,13 +135,6 @@ func sendFile(ctx context.Context, a interface {
 
 	now := time.Now().UTC()
 	msg := &waProto.Message{}
-	var replyContext *waProto.ContextInfo
-	if !isNewsletter {
-		replyContext, err = buildReplyContextInfo(a.DB(), to, opts.replyTo, opts.replyToSender)
-		if err != nil {
-			return sendFileOutcome{}, err
-		}
-	}
 	voiceMeta := voiceNoteMetadata{}
 	if opts.ptt {
 		voiceMeta = loadVoiceNoteMetadata(ctx, filePath)
@@ -194,29 +208,37 @@ func sendFile(ctx context.Context, a interface {
 			FileLength:    up.FileLength,
 		})
 	} else {
-		chatName := a.WA().ResolveChatName(ctx, to, "")
-		kind := chatKindFromJID(to)
-		if err := a.DB().UpsertChat(to.String(), kind, chatName, now); err != nil {
+		// Match text-send and receipt history using the authoritative LID
+		// mapping. Keep the actual wire destination and accepted ID unchanged.
+		storedChat := to.ToNonAD()
+		if to.Server == types.HiddenUserServer {
+			storedChat = canonicalOutboundChat(ctx, a.WA(), to)
+		}
+		chatName := a.WA().ResolveChatName(ctx, storedChat, "")
+		kind := chatKindFromJID(storedChat)
+		if err := a.DB().UpsertChat(storedChat.String(), kind, chatName, now); err != nil {
 			storeErr = fmt.Errorf("chat update: %w", err)
 		}
 		if err := a.DB().UpsertMessage(store.UpsertMessageParams{
-			ChatJID:       to.String(),
-			ChatName:      chatName,
-			MsgID:         id,
-			SenderJID:     "",
-			SenderName:    "me",
-			Timestamp:     now,
-			FromMe:        true,
-			Text:          opts.caption,
-			MediaType:     mediaType,
-			MediaCaption:  opts.caption,
-			Filename:      name,
-			MimeType:      mimeType,
-			DirectPath:    up.DirectPath,
-			MediaKey:      up.MediaKey,
-			FileSHA256:    up.FileSHA256,
-			FileEncSHA256: up.FileEncSHA256,
-			FileLength:    up.FileLength,
+			ChatJID:         storedChat.String(),
+			ChatName:        chatName,
+			MsgID:           id,
+			SenderJID:       "",
+			SenderName:      "me",
+			Timestamp:       now,
+			FromMe:          true,
+			Text:            opts.caption,
+			QuotedMsgID:     replyContext.GetStanzaID(),
+			QuotedSenderJID: canonicalOutboundQuoteSender(ctx, a.WA(), replyContext.GetParticipant()),
+			MediaType:       mediaType,
+			MediaCaption:    opts.caption,
+			Filename:        name,
+			MimeType:        mimeType,
+			DirectPath:      up.DirectPath,
+			MediaKey:        up.MediaKey,
+			FileSHA256:      up.FileSHA256,
+			FileEncSHA256:   up.FileEncSHA256,
+			FileLength:      up.FileLength,
 		}); err != nil {
 			storeErr = errors.Join(storeErr, fmt.Errorf("message update: %w", err))
 		}
@@ -416,7 +438,37 @@ func newAudioMessage(up whatsmeow.UploadResponse, mimeType string, ptt bool, met
 }
 
 func readSendFileData(filePath string) ([]byte, error) {
-	return readRegularFileLimited(filePath, maxSendFileSize)
+	return readSendFileDataLimited(filePath, maxSendFileSize)
+}
+
+func readSendFileDataLimited(filePath string, maxBytes int64) ([]byte, error) {
+	return readRegularFileLimitedWithOpener(filePath, maxBytes, openOutboundMedia)
+}
+
+// resolveSendFileMaxSize turns a requested cap (0 = default) into bytes, refusing
+// values WhatsApp would reject anyway.
+func resolveSendFileMaxSize(requested int64) (int64, error) {
+	switch {
+	case requested == 0:
+		return maxSendFileSize, nil
+	case requested < 0:
+		return 0, fmt.Errorf("max file size must be positive")
+	case requested > maxSendFileSizeLimit:
+		return 0, fmt.Errorf("max file size %d bytes exceeds WhatsApp's %d byte limit", requested, int64(maxSendFileSizeLimit))
+	}
+	return requested, nil
+}
+
+// sendFileMaxSizeFromMB converts the --max-size-mb flag (MiB) into bytes.
+func sendFileMaxSizeFromMB(mb int64) (int64, error) {
+	if mb <= 0 {
+		return 0, fmt.Errorf("--max-size-mb must be positive")
+	}
+	// Bound the input before multiplication so huge values cannot wrap.
+	if mb > maxSendFileSizeLimit/(1024*1024) {
+		return 0, fmt.Errorf("--max-size-mb must not exceed 2048")
+	}
+	return mb * 1024 * 1024, nil
 }
 
 func attachSendFileReplyContext(msg *waProto.Message, info *waProto.ContextInfo) {
@@ -455,7 +507,12 @@ func detectSendFileMIME(filePath, mimeOverride string, data []byte) string {
 	mimeType := strings.TrimSpace(mimeOverride)
 	if mimeType == "" {
 		// Use filePath for MIME detection, not the display name override.
-		mimeType = mime.TypeByExtension(strings.ToLower(filepath.Ext(filePath)))
+		ext := strings.ToLower(filepath.Ext(filePath))
+		if ext == ".m4a" {
+			mimeType = "audio/mp4"
+		} else {
+			mimeType = mime.TypeByExtension(ext)
+		}
 	}
 	if mimeType == "" {
 		sniff := data
@@ -510,16 +567,34 @@ func probeAudioWaveform(ctx context.Context, filePath string) []byte {
 	probeCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 
-	out, err := exec.CommandContext(probeCtx, "ffmpeg",
+	probeSeconds := float64(maxWaveformPCMBytes) / float64(voiceWaveformSampleRate*2)
+	cmd := exec.CommandContext(probeCtx, "ffmpeg",
 		"-v", "error",
 		"-i", filePath,
+		"-t", strconv.FormatFloat(probeSeconds, 'f', 3, 64),
 		"-ac", "1",
-		"-ar", "8000",
+		"-ar", strconv.Itoa(voiceWaveformSampleRate),
 		"-f", "s16le",
 		"-acodec", "pcm_s16le",
+		"-fs", strconv.Itoa(maxWaveformPCMBytes),
 		"-",
-	).Output()
+	)
+	stdout, err := cmd.StdoutPipe()
 	if err != nil {
+		return nil
+	}
+	if err := cmd.Start(); err != nil {
+		return nil
+	}
+	out, err := io.ReadAll(io.LimitReader(stdout, int64(maxWaveformPCMBytes)))
+	reachedLimit := len(out) == maxWaveformPCMBytes
+	if reachedLimit {
+		cancel()
+	}
+	waitErr := cmd.Wait()
+	// Killing the decoder at the byte limit is expected; other failures must
+	// not turn a partial decode into a valid waveform.
+	if err != nil || len(out) == 0 || (!reachedLimit && waitErr != nil) {
 		return nil
 	}
 	return waveformFromPCM16LE(out)

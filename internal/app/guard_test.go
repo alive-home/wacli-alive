@@ -3,6 +3,8 @@ package app
 import (
 	"context"
 	"errors"
+	"reflect"
+	"slices"
 	"testing"
 	"time"
 
@@ -10,104 +12,197 @@ import (
 	"go.mau.fi/whatsmeow/types"
 )
 
-func TestGuardWABlocksAllMutations(t *testing.T) {
-	g := guardWAClient(&fakeWA{})
-	ctx := context.Background()
-	jid := types.JID{User: "123", Server: types.DefaultUserServer}
+// The read-only decision for every WAClient method. A method upstream adds
+// must be put in one of these lists (and written out in guard.go) before the
+// tests pass; when in doubt it belongs in guardBlocked.
 
-	assertBlocked := func(name string, err error) {
-		t.Helper()
-		if !errors.Is(err, errWAMutationBlocked) {
-			t.Fatalf("%s err = %v, want errWAMutationBlocked", name, err)
+// guardBlocked methods return errWAMutationBlocked without reaching WhatsApp.
+var guardBlocked = []string{
+	"SendText", "SendProtoMessage", "SendProtoMessageWithExtra", "SendReaction",
+	"SendPoll", "SendPollVote", "RevokeMessage", "EditMessage", "DeleteMessageForMe",
+	"MarkRead",
+	"ArchiveChat", "PinChat", "MuteChat", "MarkChatAsRead", "SendAppStatePatch",
+	"SubscribePresence",
+	"CreateGroup", "SetGroupName", "SetGroupTopic", "SetGroupAnnounce", "SetGroupLocked",
+	"UpdateGroupParticipants", "UpdateGroupRequestParticipants", "JoinGroupWithLink", "LeaveGroup",
+	"FollowNewsletter", "UnfollowNewsletter",
+	"SetProfilePicture", "SetStatusMessage", "SetProfileName",
+	"Upload", "UploadNewsletter",
+}
+
+// guardDropped methods report success without reaching WhatsApp.
+var guardDropped = []string{"SendPresence", "SendChatPresence"}
+
+// guardPassThrough methods read, decode locally, or carry the protocol
+// traffic syncing needs.
+var guardPassThrough = []string{
+	"Close", "Disconnect", "IsAuthed", "IsConnected", "LinkedJID", "LinkedLID",
+	"SetAutoReconnect", "AddEventHandler", "RemoveEventHandler",
+	"ResolveChatName", "ResolveLIDToPN", "ResolvePNToLID", "GetUserInfo", "IsOnWhatsApp",
+	"GetContact", "GetAllContacts", "ContactJournal",
+	"GetJoinedGroups", "GetGroupInfo", "GetGroupRequestParticipants",
+	"GetNewsletterInfoWithInvite", "GetSubscribedNewsletters", "GetNewsletterInfo",
+	"GetProfilePictureInfo", "GetBusinessProfile",
+	"DecryptPollVote", "DecryptSecretEncryptedMessage", "DecryptReaction", "ParseWebMessage",
+	"DownloadMediaToFile", "DownloadRetriedMediaToFile", "SendMediaRetryReceipt",
+	"SetManualHistorySyncDownload", "DownloadHistorySync", "DeleteHistorySyncMedia",
+	"RequestHistorySyncOnDemand", "FetchAppState", "FetchAppStateEvents",
+	"RequestAppStateRecovery", "HasLocalAppState",
+}
+
+// guardSpecial methods have their own test below.
+var guardSpecial = []string{"Connect", "ReconnectWithBackoff", "GetGroupInviteLink", "Logout"}
+
+var waClientType = reflect.TypeOf((*WAClient)(nil)).Elem()
+
+func TestGuardWAClassifiesEveryMethod(t *testing.T) {
+	seen := map[string]int{}
+	for _, list := range [][]string{guardBlocked, guardDropped, guardPassThrough, guardSpecial} {
+		for _, name := range list {
+			seen[name]++
 		}
 	}
+	for i := 0; i < waClientType.NumMethod(); i++ {
+		name := waClientType.Method(i).Name
+		if seen[name] != 1 {
+			t.Errorf("WAClient.%s is in %d guard lists, want exactly 1", name, seen[name])
+		}
+		delete(seen, name)
+	}
+	for name := range seen {
+		t.Errorf("guard lists name %s, which WAClient does not have", name)
+	}
+}
 
-	var err error
-	_, err = g.SendText(ctx, jid, "hi")
-	assertBlocked("SendText", err)
-	_, err = g.SendProtoMessage(ctx, jid, nil)
-	assertBlocked("SendProtoMessage", err)
-	_, err = g.SendProtoMessageWithExtra(ctx, jid, nil, "")
-	assertBlocked("SendProtoMessageWithExtra", err)
-	_, err = g.SendReaction(ctx, jid, jid, "mid", "👍")
-	assertBlocked("SendReaction", err)
-	_, err = g.SendPoll(ctx, jid, "q", []string{"a"}, 1, false)
-	assertBlocked("SendPoll", err)
-	_, err = g.SendPollVote(ctx, nil, []string{"a"})
-	assertBlocked("SendPollVote", err)
-	_, err = g.RevokeMessage(ctx, jid, "mid")
-	assertBlocked("RevokeMessage", err)
-	_, err = g.EditMessage(ctx, jid, "mid", "x")
-	assertBlocked("EditMessage", err)
-	assertBlocked("DeleteMessageForMe", g.DeleteMessageForMe(ctx, types.MessageInfo{}, false))
+// callOnBareGuard calls a method on a guard that wraps nothing, so a method
+// that reaches for the wrapped client panics.
+func callOnBareGuard(t *testing.T, name string) (results []reflect.Value, reachedInner bool) {
+	t.Helper()
+	method := reflect.ValueOf(&guardWA{}).MethodByName(name)
+	if !method.IsValid() {
+		t.Fatalf("guardWA has no method %s", name)
+	}
+	args := make([]reflect.Value, method.Type().NumIn())
+	for i := range args {
+		args[i] = reflect.Zero(method.Type().In(i))
+	}
+	defer func() {
+		if recover() != nil {
+			reachedInner = true
+		}
+	}()
+	return method.Call(args), false
+}
 
-	_, err = g.ArchiveChat(ctx, jid, true, time.Now(), nil, nil)
-	assertBlocked("ArchiveChat", err)
-	_, err = g.PinChat(ctx, jid, true, nil)
-	assertBlocked("PinChat", err)
-	_, err = g.MuteChat(ctx, jid, true, time.Hour, nil)
-	assertBlocked("MuteChat", err)
-	_, err = g.MarkChatAsRead(ctx, jid, true, time.Now(), nil, nil)
-	assertBlocked("MarkChatAsRead", err)
+func lastError(results []reflect.Value) error {
+	err, _ := results[len(results)-1].Interface().(error)
+	return err
+}
 
-	_, err = g.CreateGroup(ctx, wa.CreateGroupRequest{})
-	assertBlocked("CreateGroup", err)
-	assertBlocked("SetGroupName", g.SetGroupName(ctx, jid, "n"))
-	assertBlocked("SetGroupTopic", g.SetGroupTopic(ctx, jid, "t"))
-	assertBlocked("SetGroupAnnounce", g.SetGroupAnnounce(ctx, jid, true))
-	assertBlocked("SetGroupLocked", g.SetGroupLocked(ctx, jid, true))
-	_, err = g.UpdateGroupParticipants(ctx, jid, nil, wa.GroupParticipantAdd)
-	assertBlocked("UpdateGroupParticipants", err)
-	_, err = g.UpdateGroupRequestParticipants(ctx, jid, nil, wa.GroupParticipantRequestApprove)
-	assertBlocked("UpdateGroupRequestParticipants", err)
-	_, err = g.JoinGroupWithLink(ctx, "code")
-	assertBlocked("JoinGroupWithLink", err)
-	assertBlocked("LeaveGroup", g.LeaveGroup(ctx, jid))
-
-	assertBlocked("FollowNewsletter", g.FollowNewsletter(ctx, jid))
-	assertBlocked("UnfollowNewsletter", g.UnfollowNewsletter(ctx, jid))
-
-	_, err = g.SetProfilePicture(ctx, []byte("img"))
-	assertBlocked("SetProfilePicture", err)
-	assertBlocked("SetStatusMessage", g.SetStatusMessage(ctx, "s"))
-	assertBlocked("SetProfileName", g.SetProfileName(ctx, "n"))
-
-	_, err = g.Upload(ctx, []byte("data"), "image")
-	assertBlocked("Upload", err)
-	_, err = g.UploadNewsletter(ctx, []byte("data"), "image")
-	assertBlocked("UploadNewsletter", err)
-
-	_, err = g.GetGroupInviteLink(ctx, jid, true)
-	assertBlocked("GetGroupInviteLink reset", err)
-
-	if err := g.Logout(ctx); err == nil {
-		t.Fatal("Logout err = nil, want blocked")
+func TestGuardWABlocksEveryMutation(t *testing.T) {
+	for _, name := range guardBlocked {
+		results, reachedInner := callOnBareGuard(t, name)
+		if reachedInner {
+			t.Errorf("%s reached the WhatsApp client, want blocked", name)
+			continue
+		}
+		if err := lastError(results); !errors.Is(err, errWAMutationBlocked) {
+			t.Errorf("%s err = %v, want errWAMutationBlocked", name, err)
+		}
 	}
 }
 
 func TestGuardWADropsPresenceSilently(t *testing.T) {
-	g := guardWAClient(&fakeWA{})
-	ctx := context.Background()
-	if err := g.SendPresence(ctx, types.PresenceAvailable); err != nil {
-		t.Fatalf("SendPresence err = %v, want nil", err)
-	}
-	if err := g.SendChatPresence(ctx, types.JID{}, types.ChatPresenceComposing, types.ChatPresenceMediaText); err != nil {
-		t.Fatalf("SendChatPresence err = %v, want nil", err)
+	for _, name := range guardDropped {
+		results, reachedInner := callOnBareGuard(t, name)
+		if reachedInner {
+			t.Errorf("%s reached the WhatsApp client, want dropped", name)
+			continue
+		}
+		if err := lastError(results); err != nil {
+			t.Errorf("%s err = %v, want nil", name, err)
+		}
 	}
 }
 
 func TestGuardWAPassesReadsThrough(t *testing.T) {
-	inner := &fakeWA{authed: true}
-	g := guardWAClient(inner)
-	ctx := context.Background()
+	for _, name := range guardPassThrough {
+		if _, reachedInner := callOnBareGuard(t, name); !reachedInner {
+			t.Errorf("%s did not reach the WhatsApp client, want passthrough", name)
+		}
+	}
 
+	g := guardWAClient(&fakeWA{authed: true})
 	if !g.IsAuthed() {
 		t.Fatal("IsAuthed = false, want true (passthrough)")
 	}
-	if _, err := g.GetJoinedGroups(ctx); err != nil {
+	if _, err := g.GetJoinedGroups(context.Background()); err != nil {
 		t.Fatalf("GetJoinedGroups err = %v, want nil", err)
 	}
-	if _, err := g.GetGroupInviteLink(ctx, types.JID{}, false); errors.Is(err, errWAMutationBlocked) {
+}
+
+func TestGuardWALogoutIsDisabled(t *testing.T) {
+	results, reachedInner := callOnBareGuard(t, "Logout")
+	if reachedInner {
+		t.Fatal("Logout reached the WhatsApp client, want disabled")
+	}
+	if lastError(results) == nil {
+		t.Fatal("Logout err = nil, want disabled")
+	}
+}
+
+func TestGuardWAInviteLinkReadsButNeverResets(t *testing.T) {
+	jid := types.JID{User: "123", Server: types.GroupServer}
+	if _, err := (&guardWA{}).GetGroupInviteLink(context.Background(), jid, true); !errors.Is(err, errWAMutationBlocked) {
+		t.Fatalf("GetGroupInviteLink(reset=true) err = %v, want errWAMutationBlocked", err)
+	}
+	g := guardWAClient(&fakeWA{})
+	if _, err := g.GetGroupInviteLink(context.Background(), jid, false); errors.Is(err, errWAMutationBlocked) {
 		t.Fatal("GetGroupInviteLink(reset=false) blocked, want passthrough")
+	}
+}
+
+// connectRecorder records the options the guard hands to the wrapped client.
+type connectRecorder struct {
+	WAClient
+	opts []wa.ConnectOptions
+}
+
+func (c *connectRecorder) Connect(ctx context.Context, opts wa.ConnectOptions) error {
+	c.opts = append(c.opts, opts)
+	return nil
+}
+
+func (c *connectRecorder) ReconnectWithBackoff(ctx context.Context, minDelay, maxDelay time.Duration, opts wa.ConnectOptions) error {
+	c.opts = append(c.opts, opts)
+	return nil
+}
+
+func TestGuardWANeverAnnouncesOnlineOnConnect(t *testing.T) {
+	rec := &connectRecorder{}
+	g := guardWAClient(rec)
+	if err := g.Connect(context.Background(), wa.ConnectOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := g.ReconnectWithBackoff(context.Background(), time.Second, time.Second, wa.ConnectOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if len(rec.opts) != 2 || slices.ContainsFunc(rec.opts, func(o wa.ConnectOptions) bool { return !o.SuppressInitialAvailablePresence }) {
+		t.Fatalf("connect options = %+v, want the available presence suppressed on both", rec.opts)
+	}
+}
+
+// Every client the app opens itself is the guard, never the bare client.
+func TestOpenWAWrapsTheClientInTheGuard(t *testing.T) {
+	a, err := New(Options{StoreDir: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer a.Close()
+	if err := a.OpenWA(); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := a.wa.(*guardWA); !ok {
+		t.Fatalf("OpenWA client is %T, want *guardWA", a.wa)
 	}
 }

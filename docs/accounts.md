@@ -18,7 +18,6 @@ Use a named account with any command:
 
 ```bash
 wacli --account work chats list
-wacli --account personal send text --to 1234567890 --message "hi"
 ```
 
 ## Config

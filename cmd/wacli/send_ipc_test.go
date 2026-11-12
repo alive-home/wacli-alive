@@ -5,12 +5,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"path/filepath"
+	"net"
 	"strings"
 	"testing"
+	"time"
 
-	"github.com/openclaw/wacli/internal/fsutil"
 	"github.com/openclaw/wacli/internal/lock"
+	"github.com/openclaw/wacli/internal/store"
+	"go.mau.fi/whatsmeow/types"
 )
 
 func TestTryDelegateSendFallsBackWhenSocketUnavailable(t *testing.T) {
@@ -86,6 +88,28 @@ func TestSendDelegateRequestPreservesEphemeralInJSON(t *testing.T) {
 	}
 }
 
+func TestSendDelegateRequestPreservesAllowSelfInJSON(t *testing.T) {
+	raw, err := json.Marshal(sendDelegateRequest{
+		Version:   sendDelegateVersion,
+		Kind:      "text",
+		AllowSelf: true,
+	})
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	if !strings.Contains(string(raw), `"allow_self":true`) {
+		t.Fatalf("encoded request missing allow-self flag: %s", raw)
+	}
+
+	var got sendDelegateRequest
+	if err := json.Unmarshal(raw, &got); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	if !got.AllowSelf {
+		t.Fatalf("AllowSelf = false, want true")
+	}
+}
+
 func TestSendDelegateRequestPreservesReplyInJSON(t *testing.T) {
 	raw, err := json.Marshal(sendDelegateRequest{
 		Version:       sendDelegateVersion,
@@ -144,64 +168,6 @@ func TestSendDelegateRequestPreservesPresenceInJSON(t *testing.T) {
 	}
 }
 
-func TestRemoveStaleSendDelegateSocketRefusesRegularFile(t *testing.T) {
-	path := filepath.Join(t.TempDir(), sendDelegateSocketName)
-	if err := fsutil.WritePrivateFile(path, []byte("not a socket")); err != nil {
-		t.Fatalf("WriteFile: %v", err)
-	}
-	if err := removeStaleSendDelegateSocket(path); err == nil || !strings.Contains(err.Error(), "not a socket") {
-		t.Fatalf("error = %v, want not a socket", err)
-	}
-}
-
-func TestMessagesEditDelegatesThroughSendSocketWhenStoreLocked(t *testing.T) {
-	skipPresenceDelegateSocketTestOnUnsupportedOS(t)
-	storeDir := shortPresenceDelegateStoreDir(t)
-	lk, err := lock.Acquire(storeDir)
-	if err != nil {
-		t.Fatalf("lock store: %v", err)
-	}
-	defer lk.Release()
-
-	server := startPresenceDelegateTestSocket(t, storeDir, func(req sendDelegateRequest) sendDelegateResponse {
-		return sendDelegateResponse{
-			OK: true, Sent: true, To: "123@s.whatsapp.net", ID: "sent-id", Target: req.ID,
-		}
-	})
-	defer server.stop()
-
-	stdout, stderr, err := runPresenceDelegateHelper(t, []string{
-		"--store", storeDir, "--json", "--timeout", "750ms",
-		"messages", "edit", "--chat", "123@s.whatsapp.net", "--id", "ABC",
-		"--message", "edited", "--post-send-wait", "25ms",
-	})
-	if err != nil {
-		t.Fatalf("messages edit failed: %v stdout=%q stderr=%q", err, stdout, stderr)
-	}
-
-	req := server.nextRequest(t)
-	if req.Version != sendDelegateVersion || req.Kind != "edit" {
-		t.Fatalf("delegate version/kind = %d/%q", req.Version, req.Kind)
-	}
-	if req.To != "123@s.whatsapp.net" || req.ID != "ABC" || req.Message != "edited" {
-		t.Fatalf("delegate mutation target = %+v", req)
-	}
-	if req.TimeoutMS != 750 || req.PostSendWaitMS != 25 {
-		t.Fatalf("delegate timeouts = command %dms post-send %dms", req.TimeoutMS, req.PostSendWaitMS)
-	}
-	if req.DeadlineUnixMS == 0 {
-		t.Fatal("delegated request missing absolute command deadline")
-	}
-	if strings.Contains(stderr, "store is locked") {
-		t.Fatalf("delegated command tried the direct store path: stderr=%q", stderr)
-	}
-	for _, want := range []string{`"edited":true`, `"id":"sent-id"`, `"target":"ABC"`} {
-		if !strings.Contains(stdout, want) {
-			t.Fatalf("stdout %q missing %s", stdout, want)
-		}
-	}
-}
-
 func TestExecuteDelegatedSendAcceptsEditKind(t *testing.T) {
 	// Reaching app use proves the daemon dispatcher recognized the edit kind.
 	defer func() { _ = recover() }()
@@ -214,5 +180,202 @@ func TestExecuteDelegatedSendAcceptsEditKind(t *testing.T) {
 	})
 	if err != nil && strings.Contains(err.Error(), "unsupported send kind") {
 		t.Fatalf("edit rejected as unsupported kind: %v", err)
+	}
+}
+
+func TestSendDelegateRequestPreservesMarkReadInJSON(t *testing.T) {
+	read := true
+	raw, err := json.Marshal(sendDelegateRequest{
+		Version: sendDelegateVersion,
+		Kind:    "mark_read",
+		To:      "123@s.whatsapp.net",
+		Read:    &read,
+	})
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	if !strings.Contains(string(raw), `"read":true`) {
+		t.Fatalf("encoded request missing read flag: %s", raw)
+	}
+
+	var got sendDelegateRequest
+	if err := json.Unmarshal(raw, &got); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	if got.Kind != "mark_read" {
+		t.Fatalf("Kind = %q, want mark_read", got.Kind)
+	}
+	if got.Read == nil || !*got.Read {
+		t.Fatalf("Read = %v, want true", got.Read)
+	}
+
+	unread := false
+	rawUnread, err := json.Marshal(sendDelegateRequest{
+		Version: sendDelegateVersion,
+		Kind:    "mark_read",
+		To:      "123@s.whatsapp.net",
+		Read:    &unread,
+	})
+	if err != nil {
+		t.Fatalf("Marshal unread: %v", err)
+	}
+	var gotUnread sendDelegateRequest
+	if err := json.Unmarshal(rawUnread, &gotUnread); err != nil {
+		t.Fatalf("Unmarshal unread: %v", err)
+	}
+	if gotUnread.Read == nil || *gotUnread.Read {
+		t.Fatalf("Read = %v, want false", gotUnread.Read)
+	}
+}
+
+type fakeDelegatedChatStateApp struct {
+	calls chan string
+}
+
+func (f *fakeDelegatedChatStateApp) DB() *store.DB { return nil }
+
+func (f *fakeDelegatedChatStateApp) ArchiveChat(_ context.Context, chat types.JID, archive bool) error {
+	f.calls <- fmt.Sprintf("archive %s %t", chat, archive)
+	return nil
+}
+
+func (f *fakeDelegatedChatStateApp) PinChat(_ context.Context, chat types.JID, pin bool) error {
+	f.calls <- fmt.Sprintf("pin %s %t", chat, pin)
+	return nil
+}
+
+func (f *fakeDelegatedChatStateApp) MuteChat(_ context.Context, chat types.JID, mute bool, duration time.Duration) error {
+	f.calls <- fmt.Sprintf("mute %s %t %s", chat, mute, duration)
+	return nil
+}
+
+func TestExecuteDelegatedChatStateRejectsUnknownActionBeforeAppUse(t *testing.T) {
+	fake := &fakeDelegatedChatStateApp{calls: make(chan string, 1)}
+	_, err := executeDelegatedChatState(context.Background(), fake, sendDelegateRequest{
+		Kind:            chatStateKind,
+		ChatStateAction: "delete",
+		To:              "123@s.whatsapp.net",
+	})
+	if err == nil || !strings.Contains(err.Error(), `unsupported chat state action "delete"`) {
+		t.Fatalf("error = %v, want unsupported action", err)
+	}
+	select {
+	case call := <-fake.calls:
+		t.Fatalf("unknown action reached the app: %s", call)
+	default:
+	}
+}
+
+func TestDelegatedChatStateDoesNotWaitForSendQueue(t *testing.T) {
+	tests := []struct {
+		name    string
+		spacing sendSpacing
+	}{
+		{name: "unpaced"},
+		{name: "paced", spacing: sendSpacing{min: time.Second, max: time.Second}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			serverConn, clientConn := net.Pipe()
+			defer clientConn.Close()
+			if err := clientConn.SetDeadline(time.Now().Add(time.Second)); err != nil {
+				t.Fatalf("set client deadline: %v", err)
+			}
+
+			sendSlot := make(chan struct{}, 1) // empty means an earlier send owns it
+			executed := make(chan sendDelegateRequest, 1)
+			go handleSendDelegateConn(context.Background(), serverConn, func(_ context.Context, req sendDelegateRequest) (sendDelegateResponse, error) {
+				executed <- req
+				return sendDelegateResponse{OK: true, Chat: req.To, Action: req.ChatStateAction}, nil
+			}, sendSlot, newSendPacer(tt.spacing))
+
+			req := chatStateDelegateRequest("archive", 0)
+			req.Version = sendDelegateVersion
+			req.To = "123@s.whatsapp.net"
+			if err := json.NewEncoder(clientConn).Encode(req); err != nil {
+				t.Fatalf("encode request: %v", err)
+			}
+			var resp sendDelegateResponse
+			if err := json.NewDecoder(clientConn).Decode(&resp); err != nil {
+				t.Fatalf("chat state waited behind the send queue: %v", err)
+			}
+			if !resp.OK || resp.Action != "archive" {
+				t.Fatalf("response = %+v, want archive ok", resp)
+			}
+			if got := <-executed; got.Kind != chatStateKind {
+				t.Fatalf("executed kind = %q, want %q", got.Kind, chatStateKind)
+			}
+		})
+	}
+}
+
+func TestDelegatedChatStateExtendsIPCDeadlineThroughResponse(t *testing.T) {
+	serverConn, clientConn := net.Pipe()
+	trackedServerConn := &deadlineRecordingConn{Conn: serverConn}
+	defer clientConn.Close()
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		handleSendDelegateConn(context.Background(), trackedServerConn, func(ctx context.Context, req sendDelegateRequest) (sendDelegateResponse, error) {
+			return sendDelegateResponse{OK: true, Chat: req.To, Action: req.ChatStateAction}, nil
+		}, make(chan struct{}, 1), newSendPacer(sendSpacing{}))
+	}()
+
+	const requestTimeout = 10 * time.Minute
+	started := time.Now()
+	req := chatStateDelegateRequest("archive", 0)
+	req.Version = sendDelegateVersion
+	req.To = "123@s.whatsapp.net"
+	req.TimeoutMS = durationMillis(requestTimeout)
+	if err := json.NewEncoder(clientConn).Encode(req); err != nil {
+		t.Fatalf("encode request: %v", err)
+	}
+	var resp sendDelegateResponse
+	if err := json.NewDecoder(clientConn).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	<-done
+
+	if len(trackedServerConn.deadlines) != 2 {
+		t.Fatalf("deadlines = %v, want initial decode and chat-state request deadlines", trackedServerConn.deadlines)
+	}
+	wantAtLeast := started.Add(requestTimeout)
+	if got := trackedServerConn.deadlines[1]; got.Before(wantAtLeast) {
+		t.Fatalf("chat-state connection deadline = %s, want at least %s", got, wantAtLeast)
+	}
+}
+
+func TestDelegatedChatStateHonorsAbsoluteCallerDeadline(t *testing.T) {
+	serverConn, clientConn := net.Pipe()
+	defer clientConn.Close()
+	if err := clientConn.SetDeadline(time.Now().Add(time.Second)); err != nil {
+		t.Fatalf("set client deadline: %v", err)
+	}
+
+	executed := make(chan struct{}, 1)
+	go handleSendDelegateConn(context.Background(), serverConn, func(context.Context, sendDelegateRequest) (sendDelegateResponse, error) {
+		executed <- struct{}{}
+		return sendDelegateResponse{OK: true}, nil
+	}, make(chan struct{}, 1), newSendPacer(sendSpacing{}))
+
+	req := chatStateDelegateRequest("archive", 0)
+	req.Version = sendDelegateVersion
+	req.TimeoutMS = durationMillis(10 * time.Minute)
+	req.DeadlineUnixMS = time.Now().Add(-time.Second).UnixMilli()
+	if err := json.NewEncoder(clientConn).Encode(req); err != nil {
+		t.Fatalf("encode request: %v", err)
+	}
+	var resp sendDelegateResponse
+	if err := json.NewDecoder(clientConn).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp.OK || !strings.Contains(resp.Error, "it was not sent") {
+		t.Fatalf("response = %+v, want a refusal before dispatch", resp)
+	}
+	select {
+	case <-executed:
+		t.Fatal("chat state ran after its caller's deadline")
+	default:
 	}
 }

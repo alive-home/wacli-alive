@@ -12,10 +12,11 @@ import (
 	"github.com/openclaw/wacli/internal/config"
 	"github.com/openclaw/wacli/internal/lock"
 	"github.com/openclaw/wacli/internal/out"
+	"github.com/openclaw/wacli/internal/wa"
 	"github.com/spf13/cobra"
 )
 
-const sourceVersion = "0.16.0-readonly"
+const sourceVersion = "0.26.0-readonly"
 
 var version string
 
@@ -53,14 +54,26 @@ type rootFlags struct {
 
 func execute(args []string) error {
 	var flags rootFlags
+	rootCmd := newRootCmd(&flags)
+	rootCmd.SetArgs(args)
+	if err := rootCmd.Execute(); err != nil {
+		writeRootError(flags, err)
+		return err
+	}
+	return nil
+}
 
+func newRootCmd(flags *rootFlags) *cobra.Command {
 	rootCmd := &cobra.Command{
 		Use:           "wacli",
-		Short:         "WhatsApp CLI (read-only build): sync, search",
-		Long:          "wacli is a WhatsApp CLI for syncing and searching from local scripts.\nThis is a read-only build: sending and mutating WhatsApp state is disabled.\n\nDocs: " + docsURL,
+		Short:         "WhatsApp CLI (read-only build): sync, search, read",
+		Long:          "wacli mirrors your WhatsApp messages into a local database you can search and read.\nThis is a read-only build: it cannot send messages or change anything on WhatsApp.",
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		Version:       effectiveVersion(),
+		PersistentPreRun: func(cmd *cobra.Command, args []string) {
+			wa.SetLibsignalEvents(out.NewEventWriter(os.Stderr, flags.events))
+		},
 	}
 	rootCmd.SetVersionTemplate("wacli {{.Version}}\n")
 
@@ -74,31 +87,30 @@ func execute(args []string) error {
 	rootCmd.PersistentFlags().BoolVar(&flags.readOnly, "read-only", false, "reject commands that intentionally write WhatsApp or the local store (or set WACLI_READONLY=1)")
 
 	rootCmd.AddCommand(newVersionCmd())
-	rootCmd.AddCommand(newAccountsCmd(&flags))
-	rootCmd.AddCommand(newDoctorCmd(&flags))
-	rootCmd.AddCommand(newAuthCmd(&flags))
-	rootCmd.AddCommand(newSyncCmd(&flags))
-	rootCmd.AddCommand(newMessagesCmd(&flags))
-	rootCmd.AddCommand(newCallsCmd(&flags))
-	// Read-only build: send, poll and presence commands are not registered.
-	// The WAClient guard additionally hard-blocks every mutating operation.
-	rootCmd.AddCommand(newPollsCmd(&flags))
-	rootCmd.AddCommand(newMediaCmd(&flags))
-	rootCmd.AddCommand(newContactsCmd(&flags))
-	rootCmd.AddCommand(newChatsCmd(&flags))
-	rootCmd.AddCommand(newGroupsCmd(&flags))
-	rootCmd.AddCommand(newChannelsCmd(&flags))
-	rootCmd.AddCommand(newHistoryCmd(&flags))
-	rootCmd.AddCommand(newProfileCmd(&flags))
-	rootCmd.AddCommand(newDocsCmd(&flags))
-	rootCmd.AddCommand(newStoreCmd(&flags))
+	rootCmd.AddCommand(newAccountsCmd(flags))
+	rootCmd.AddCommand(newDoctorCmd(flags))
+	rootCmd.AddCommand(newAuthCmd(flags))
+	rootCmd.AddCommand(newSyncCmd(flags))
+	rootCmd.AddCommand(newMessagesCmd(flags))
+	rootCmd.AddCommand(newCallsCmd(flags))
+	rootCmd.AddCommand(newSendCmd(flags))
+	rootCmd.AddCommand(newPollCmd(flags))
+	rootCmd.AddCommand(newPollsCmd(flags))
+	rootCmd.AddCommand(newMediaCmd(flags))
+	rootCmd.AddCommand(newContactsCmd(flags))
+	rootCmd.AddCommand(newChatsCmd(flags))
+	rootCmd.AddCommand(newGroupsCmd(flags))
+	rootCmd.AddCommand(newChannelsCmd(flags))
+	rootCmd.AddCommand(newHistoryCmd(flags))
+	rootCmd.AddCommand(newPresenceCmd(flags))
+	rootCmd.AddCommand(newProfileCmd(flags))
+	rootCmd.AddCommand(newDocsCmd(flags))
+	rootCmd.AddCommand(newStoreCmd(flags))
 
-	rootCmd.SetArgs(args)
-	if err := rootCmd.Execute(); err != nil {
-		writeRootError(flags, err)
-		return err
-	}
-	return nil
+	// Read-only build: drop every command that sends or changes WhatsApp.
+	// The WAClient guard additionally hard-blocks every mutating operation.
+	applyReadOnlyBuild(rootCmd, flags)
+	return rootCmd
 }
 
 func writeRootError(flags rootFlags, err error) {

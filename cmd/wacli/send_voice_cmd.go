@@ -30,6 +30,9 @@ func newSendVoiceCmd(flags *rootFlags) *cobra.Command {
 			if err := flags.requireWritable(); err != nil {
 				return err
 			}
+			if err := checkOutboundMediaPath(filePath); err != nil {
+				return err
+			}
 
 			ctx, cancel := withTimeout(context.Background(), flags)
 			defer cancel()
@@ -60,7 +63,7 @@ func newSendVoiceCmd(flags *rootFlags) *cobra.Command {
 			}
 			defer closeApp(a, lk)
 
-			if err := a.EnsureAuthed(); err != nil {
+			if err := a.EnsureAuthed(ctx); err != nil {
 				return err
 			}
 
@@ -76,7 +79,7 @@ func newSendVoiceCmd(flags *rootFlags) *cobra.Command {
 				return err
 			}
 
-			res, err := runSendOperation(ctx, reconnectForSend(a), func(ctx context.Context) (sendFileOutcome, error) {
+			res, err := runFileSendOperation(ctx, reconnectForSend(a), filePath, func(ctx context.Context) (sendFileOutcome, error) {
 				return sendFile(ctx, a, toJID, filePath, sendFileOptions{
 					mimeOverride:  mimeOverride,
 					replyTo:       replyTo,

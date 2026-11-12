@@ -4,13 +4,17 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"encoding/json"
 	"image"
 	"image/color"
 	"image/jpeg"
 	"image/png"
+	"mime"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -18,6 +22,7 @@ import (
 	"github.com/openclaw/wacli/internal/wa"
 	"go.mau.fi/whatsmeow"
 	waProto "go.mau.fi/whatsmeow/binary/proto"
+	"go.mau.fi/whatsmeow/types"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -39,6 +44,22 @@ func TestDetectSendFileMIMEAddsOpusCodecForOgg(t *testing.T) {
 				t.Fatalf("mime = %q, want %q", got, tc.want)
 			}
 		})
+	}
+}
+
+func TestDetectSendFileMIMEUsesAudioMP4ForM4A(t *testing.T) {
+	previous := mime.TypeByExtension(".m4a")
+	if err := mime.AddExtensionType(".m4a", "audio/mp4a-latm"); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = mime.AddExtensionType(".m4a", previous) })
+	for _, filePath := range []string{"service.m4a", "SERVICE.M4A"} {
+		if got := detectSendFileMIME(filePath, "", nil); got != "audio/mp4" {
+			t.Fatalf("%s: mime = %q, want audio/mp4", filePath, got)
+		}
+	}
+	if got := detectSendFileMIME("service.m4a", "audio/custom", nil); got != "audio/custom" {
+		t.Fatalf("explicit MIME override = %q, want audio/custom", got)
 	}
 }
 
@@ -351,6 +372,112 @@ func TestProbeAudioMetadataWithFFmpeg(t *testing.T) {
 	}
 }
 
+// Keep in sync with maxWaveformPCMBytes.
+const testWaveformPCMCap = 2 << 20
+
+func TestProbeAudioWaveformCapsFFmpegStdout(t *testing.T) {
+	installFakeFFmpegPCMWriter(t, testWaveformPCMCap, testWaveformPCMCap*2)
+
+	input := filepath.Join(t.TempDir(), "voice.ogg")
+	if err := os.WriteFile(input, []byte("placeholder"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	got := probeAudioWaveform(context.Background(), input)
+	full := patternedWaveformPCM(testWaveformPCMCap, testWaveformPCMCap*2)
+	want := waveformFromPCM16LE(full[:testWaveformPCMCap])
+	uncapped := waveformFromPCM16LE(full)
+	if bytes.Equal(want, uncapped) {
+		t.Fatal("fixture prefix and full PCM produce the same waveform")
+	}
+	if bytes.Equal(got, uncapped) {
+		t.Fatalf("waveform matches uncapped %d-byte PCM; ffmpeg stdout was not capped", len(full))
+	}
+	if !bytes.Equal(got, want) {
+		t.Fatalf("waveform = %v, want prefix of %d bytes", got, testWaveformPCMCap)
+	}
+}
+
+func TestProbeAudioWaveformShortDecodeExitStatus(t *testing.T) {
+	for _, exitCode := range []int{0, 1} {
+		t.Run(strconv.Itoa(exitCode), func(t *testing.T) {
+			installFakeFFmpegPCMWriter(t, 512, 1024)
+			t.Setenv("FAKE_FFMPEG_EXIT", strconv.Itoa(exitCode))
+			got := probeAudioWaveform(context.Background(), "voice.ogg")
+			if exitCode != 0 {
+				if got != nil {
+					t.Fatal("failed decoder returned a waveform from partial PCM")
+				}
+				return
+			}
+			if want := waveformFromPCM16LE(patternedWaveformPCM(512, 1024)); !bytes.Equal(got, want) {
+				t.Fatalf("short waveform = %v, want %v", got, want)
+			}
+		})
+	}
+}
+
+func patternedWaveformPCM(prefix, total int) []byte {
+	buf := make([]byte, total)
+	for i := 0; i < prefix; i += 2 {
+		binary.LittleEndian.PutUint16(buf[i:i+2], 100)
+	}
+	for i := prefix; i < total; i += 2 {
+		binary.LittleEndian.PutUint16(buf[i:i+2], 10000)
+	}
+	return buf
+}
+
+func installFakeFFmpegPCMWriter(t *testing.T, prefix, total int) {
+	t.Helper()
+	dir := t.TempDir()
+	src := filepath.Join(dir, "main.go")
+	program := `package main
+
+import (
+	"encoding/binary"
+	"os"
+	"strconv"
+)
+
+func main() {
+	prefix, _ := strconv.Atoi(os.Getenv("FAKE_FFMPEG_PREFIX"))
+	total, _ := strconv.Atoi(os.Getenv("FAKE_FFMPEG_TOTAL"))
+	if prefix <= 0 || total < prefix || total%2 != 0 || prefix%2 != 0 {
+		os.Exit(2)
+	}
+	buf := make([]byte, total)
+	for i := 0; i < prefix; i += 2 {
+		binary.LittleEndian.PutUint16(buf[i:i+2], 100)
+	}
+	for i := prefix; i < total; i += 2 {
+		binary.LittleEndian.PutUint16(buf[i:i+2], 10000)
+	}
+	_, _ = os.Stdout.Write(buf)
+	exitCode, _ := strconv.Atoi(os.Getenv("FAKE_FFMPEG_EXIT"))
+	os.Exit(exitCode)
+}
+`
+	if err := os.WriteFile(src, []byte(program), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module fakefmpeg\n\ngo 1.22\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	out := filepath.Join(dir, "ffmpeg")
+	if runtime.GOOS == "windows" {
+		out += ".exe"
+	}
+	build := exec.Command("go", "build", "-o", out, src)
+	build.Dir = dir
+	if b, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("go build fake ffmpeg: %v\n%s", err, b)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("FAKE_FFMPEG_PREFIX", strconv.Itoa(prefix))
+	t.Setenv("FAKE_FFMPEG_TOTAL", strconv.Itoa(total))
+}
+
 func TestAttachSendFileReplyContext(t *testing.T) {
 	for _, tc := range []struct {
 		name string
@@ -388,5 +515,114 @@ func TestAttachSendFileReplyContext(t *testing.T) {
 				t.Fatalf("context info was not attached")
 			}
 		})
+	}
+}
+
+func TestResolveSendFileMaxSize(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		requested int64
+		want      int64
+		wantErr   bool
+	}{
+		{name: "default", requested: 0, want: maxSendFileSize},
+		{name: "raised", requested: 500 * 1024 * 1024, want: 500 * 1024 * 1024},
+		{name: "whatsapp limit", requested: maxSendFileSizeLimit, want: maxSendFileSizeLimit},
+		{name: "over whatsapp limit", requested: maxSendFileSizeLimit + 1, wantErr: true},
+		{name: "negative", requested: -1, wantErr: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := resolveSendFileMaxSize(tc.requested)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("expected error, got %d", got)
+				}
+				return
+			}
+			if err != nil || got != tc.want {
+				t.Fatalf("resolveSendFileMaxSize(%d) = %d, %v; want %d", tc.requested, got, err, tc.want)
+			}
+		})
+	}
+}
+
+func TestSendFileMaxSizeFromMB(t *testing.T) {
+	if got, err := sendFileMaxSizeFromMB(150); err != nil || got != 150*1024*1024 {
+		t.Fatalf("150 MiB = %d, %v", got, err)
+	}
+	if got, err := sendFileMaxSizeFromMB(2048); err != nil || got != maxSendFileSizeLimit {
+		t.Fatalf("2048 MiB = %d, %v", got, err)
+	}
+	for _, mb := range []int64{0, -5, 2049, (1 << 44) + 100, 1 << 44, 1<<63 - 1} {
+		if _, err := sendFileMaxSizeFromMB(mb); err == nil {
+			t.Fatalf("expected error for %d MiB", mb)
+		}
+	}
+}
+
+func TestReadSendFileDataLimitedHonorsRaisedCap(t *testing.T) {
+	path := t.TempDir() + "/doc.bin"
+	if err := fsutil.WritePrivateFile(path, []byte("0123456789A")); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	if _, err := readSendFileDataLimited(path, 10); err == nil || !strings.Contains(err.Error(), "file too large") {
+		t.Fatalf("expected file too large under a 10 byte cap, got %v", err)
+	}
+	data, err := readSendFileDataLimited(path, 11)
+	if err != nil || string(data) != "0123456789A" {
+		t.Fatalf("raised cap: %q, %v", data, err)
+	}
+}
+
+func TestSendFileCommandExposesMaxSizeFlag(t *testing.T) {
+	flag := newSendFileCmd(&rootFlags{}).Flags().Lookup("max-size-mb")
+	if flag == nil {
+		t.Fatal("missing --max-size-mb flag")
+	}
+	if flag.DefValue != "100" {
+		t.Fatalf("--max-size-mb default = %s, want 100", flag.DefValue)
+	}
+}
+
+func TestSendDelegateRequestCarriesMaxSize(t *testing.T) {
+	raw, err := json.Marshal(sendDelegateRequest{Kind: "file", MaxSizeBytes: 300 * 1024 * 1024})
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	var back sendDelegateRequest
+	if err := json.Unmarshal(raw, &back); err != nil || back.MaxSizeBytes != 300*1024*1024 {
+		t.Fatalf("round trip: %+v, %v (%s)", back, err, raw)
+	}
+	raw, _ = json.Marshal(sendDelegateRequest{Kind: "file"})
+	if strings.Contains(string(raw), "max_size_bytes") {
+		t.Fatalf("default cap should be omitted from the request: %s", raw)
+	}
+}
+
+func TestSendFileRejectsInvalidCapBeforeRead(t *testing.T) {
+	for _, cap := range []int64{-1, maxSendFileSizeLimit + 1, 1<<63 - 1} {
+		_, err := sendFile(context.Background(), nil, types.JID{}, "missing-file", sendFileOptions{maxSize: cap})
+		if err == nil || !strings.Contains(err.Error(), "max file size") {
+			t.Fatalf("cap %d: expected cap validation before reading, got %v", cap, err)
+		}
+	}
+}
+
+func TestDelegatedFileRejectsInvalidCapBeforeRecipient(t *testing.T) {
+	for _, cap := range []int64{-1, maxSendFileSizeLimit + 1, 1<<63 - 1} {
+		_, err := executeDelegatedFile(context.Background(), nil, sendDelegateRequest{Kind: "file", MaxSizeBytes: cap})
+		if err == nil || !strings.Contains(err.Error(), "max file size") {
+			t.Fatalf("cap %d: expected cap validation before recipient lookup, got %v", cap, err)
+		}
+	}
+}
+
+func TestSendFileCommandRejectsInvalidCapBeforeStore(t *testing.T) {
+	for _, cap := range []string{"0", "-1", "2049", "17592186044516", "9223372036854775807"} {
+		cmd := newSendFileCmd(&rootFlags{readOnly: true})
+		cmd.SetArgs([]string{"--to", "15550001111", "--file", "missing-file", "--max-size-mb", cap})
+		if err := cmd.Execute(); err == nil || !strings.Contains(err.Error(), "--max-size-mb") {
+			t.Fatalf("cap %s: expected cap validation before store access, got %v", cap, err)
+		}
 	}
 }
