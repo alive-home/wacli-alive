@@ -237,6 +237,8 @@ var PromptCommands = []struct{ Command, NL, EN string }{
 	{`--help`, "alle opdrachten", "every command"},
 }
 
+var englishPlaceholders = strings.NewReplacer(`"tekst"`, `"text"`, `"naam"`, `"name"`)
+
 // Prompt is the text a person pastes into their AI assistant so it knows what
 // this link is and how to read from it.
 func Prompt(lang, storeDir, storeFlag string) string {
@@ -246,21 +248,21 @@ func Prompt(lang, storeDir, storeFlag string) string {
 	}
 	var b strings.Builder
 	if lang == "nl" {
-		b.WriteString("Mijn WhatsApp is op deze computer gekoppeld met wacli. wacli kan alleen lezen: berichten versturen, verwijderen of als gelezen markeren kan het niet.\n\nZo gebruik je het in de terminal:\n")
+		b.WriteString("Mijn WhatsApp is op deze computer gekoppeld met wacli. Het kan alleen lezen, niet versturen.\n\nOpdrachten:\n")
 	} else {
-		b.WriteString("My WhatsApp is linked on this computer with wacli. wacli can only read: it cannot send or delete messages, or mark them as read.\n\nUse it in the terminal like this:\n")
+		b.WriteString("My WhatsApp is linked on this computer with wacli. It can only read, not send.\n\nCommands:\n")
 	}
 	for _, c := range PromptCommands {
-		use := c.EN
+		use, command := c.EN, englishPlaceholders.Replace(c.Command)
 		if lang == "nl" {
-			use = c.NL
+			use, command = c.NL, c.Command
 		}
-		fmt.Fprintf(&b, "- %s %s: %s\n", wacli, c.Command, use)
+		fmt.Fprintf(&b, "- %s %s: %s\n", wacli, command, use)
 	}
 	if lang == "nl" {
-		fmt.Fprintf(&b, "\nZet --json achter een opdracht voor uitvoer die je kunt verwerken. De berichten staan in %s.\nIs WhatsApp niet meer gekoppeld? Start dan `%s auth --open`; ik scan de code.", storeDir, wacli)
+		fmt.Fprintf(&b, "\nMet --json krijg je uitvoer die je kunt verwerken. De berichten staan in %s.\nNiet meer gekoppeld? Start `%s auth --open`; ik scan de code.", storeDir, wacli)
 	} else {
-		fmt.Fprintf(&b, "\nAdd --json to a command for output you can parse. The messages are stored in %s.\nIs WhatsApp no longer linked? Run `%s auth --open` and I will scan the code.", storeDir, wacli)
+		fmt.Fprintf(&b, "\nAdd --json for output you can parse. The messages are in %s.\nNo longer linked? Run `%s auth --open` and I will scan the code.", storeDir, wacli)
 	}
 	return b.String()
 }

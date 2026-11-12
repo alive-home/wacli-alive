@@ -234,7 +234,7 @@ func TestQRPathDrawsEveryDarkModule(t *testing.T) {
 
 func TestPromptPointsAtTheStore(t *testing.T) {
 	plain := Prompt("en", "/Users/anna/.wacli", "")
-	if !strings.Contains(plain, "- wacli chats list: ") || !strings.Contains(plain, "/Users/anna/.wacli") {
+	if !strings.Contains(plain, "- wacli chats list: ") || !strings.Contains(plain, "/Users/anna/.wacli") || !strings.Contains(plain, `messages search "text"`) {
 		t.Fatalf("prompt = %s", plain)
 	}
 	elsewhere := Prompt("nl", "/data/wa", `--store "/data/wa"`)
