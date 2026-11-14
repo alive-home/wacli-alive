@@ -18,29 +18,6 @@ import (
 
 const sourceVersion = "0.26.0-readonly"
 
-var version string
-
-const releaseLinkerSettingPrefix = "wacli-release-linker-version=["
-
-var releaseLinkerSetting string
-
-func effectiveVersion() string {
-	if version == "" && releaseLinkerSetting == "" {
-		return sourceVersion
-	}
-	// Source/HEAD package builds historically set only main.version. Official
-	// release artifacts additionally require the marker during verification.
-	if version != "" && releaseLinkerSetting == "" {
-		return version
-	}
-	if version != "" && releaseLinkerSetting == releaseLinkerSettingPrefix+version+"]" {
-		return version
-	}
-	return "invalid-release-linker-version"
-}
-
-const docsURL = "https://wacli.sh"
-
 type rootFlags struct {
 	storeDir   string
 	account    string
@@ -70,7 +47,7 @@ func newRootCmd(flags *rootFlags) *cobra.Command {
 		Long:          "wacli mirrors your WhatsApp messages into a local database you can search and read.\nThis is a read-only build: it cannot send messages or change anything on WhatsApp.",
 		SilenceUsage:  true,
 		SilenceErrors: true,
-		Version:       effectiveVersion(),
+		Version:       sourceVersion,
 		PersistentPreRun: func(cmd *cobra.Command, args []string) {
 			wa.SetLibsignalEvents(out.NewEventWriter(os.Stderr, flags.events))
 		},
@@ -93,7 +70,6 @@ func newRootCmd(flags *rootFlags) *cobra.Command {
 	rootCmd.AddCommand(newSyncCmd(flags))
 	rootCmd.AddCommand(newMessagesCmd(flags))
 	rootCmd.AddCommand(newCallsCmd(flags))
-	rootCmd.AddCommand(newSendCmd(flags))
 	rootCmd.AddCommand(newPollCmd(flags))
 	rootCmd.AddCommand(newPollsCmd(flags))
 	rootCmd.AddCommand(newMediaCmd(flags))
@@ -102,14 +78,12 @@ func newRootCmd(flags *rootFlags) *cobra.Command {
 	rootCmd.AddCommand(newGroupsCmd(flags))
 	rootCmd.AddCommand(newChannelsCmd(flags))
 	rootCmd.AddCommand(newHistoryCmd(flags))
-	rootCmd.AddCommand(newPresenceCmd(flags))
 	rootCmd.AddCommand(newProfileCmd(flags))
-	rootCmd.AddCommand(newDocsCmd(flags))
 	rootCmd.AddCommand(newStoreCmd(flags))
 
 	// Read-only build: drop every command that sends or changes WhatsApp.
 	// The WAClient guard additionally hard-blocks every mutating operation.
-	applyReadOnlyBuild(rootCmd, flags)
+	applyReadOnlyBuild(rootCmd)
 	return rootCmd
 }
 
@@ -140,7 +114,7 @@ func newApp(ctx context.Context, flags *rootFlags, needLock bool, allowUnauthed 
 
 	a, err := app.New(app.Options{
 		StoreDir:      storeDir,
-		Version:       effectiveVersion(),
+		Version:       sourceVersion,
 		JSON:          flags.asJSON,
 		Events:        out.NewEventWriter(os.Stderr, flags.events),
 		AllowUnauthed: allowUnauthed,

@@ -34,31 +34,8 @@ const (
 	SyncModeFollow    SyncMode = "follow"
 )
 
-type SyncPresenceMode string
-
-const (
-	SyncPresenceModeNormal SyncPresenceMode = "normal"
-	SyncPresenceModeQuiet  SyncPresenceMode = "quiet"
-)
-
-func ParseSyncPresenceMode(value string) (SyncPresenceMode, error) {
-	switch SyncPresenceMode(strings.TrimSpace(value)) {
-	case "", SyncPresenceModeNormal:
-		return SyncPresenceModeNormal, nil
-	case SyncPresenceModeQuiet:
-		return SyncPresenceModeQuiet, nil
-	default:
-		return "", fmt.Errorf("--presence-mode must be one of: normal, quiet")
-	}
-}
-
-func (m SyncPresenceMode) SendsAvailablePresence() bool {
-	return m != SyncPresenceModeQuiet
-}
-
 type SyncOptions struct {
 	Mode                SyncMode
-	PresenceMode        SyncPresenceMode
 	AllowQR             bool
 	OnQRCode            func(string)
 	PairPhoneNumber     string
@@ -93,12 +70,6 @@ func (a *App) Sync(ctx context.Context, opts SyncOptions) (SyncResult, error) {
 	if opts.Mode == "" {
 		opts.Mode = SyncModeFollow
 	}
-	if opts.PresenceMode == "" {
-		opts.PresenceMode = SyncPresenceModeNormal
-	}
-	// A quiet sync never shows as available, so WhatsApp would send nothing
-	// to a presence subscription delegated to it.
-	a.presenceWatch.setQuiet(!opts.PresenceMode.SendsAvailablePresence())
 	if (opts.Mode == SyncModeBootstrap || opts.Mode == SyncModeOnce) && opts.IdleExit <= 0 {
 		opts.IdleExit = 30 * time.Second
 	}
@@ -177,8 +148,7 @@ func (a *App) Sync(ctx context.Context, opts SyncOptions) (SyncResult, error) {
 		defer stopWebhook()
 	}
 
-	ps := &syncPresence{}
-	handlerID, appStateRecoveries := a.addSyncEventHandler(syncCtx, opts, &messagesStored, &lastEvent, disconnected, loggedOut, staleReconnect, enqueueMedia, enqueueWebhook, limits, ps, mediaQ)
+	handlerID, appStateRecoveries := a.addSyncEventHandler(syncCtx, opts, &messagesStored, &lastEvent, disconnected, loggedOut, staleReconnect, enqueueMedia, enqueueWebhook, limits, mediaQ)
 	defer a.wa.RemoveEventHandler(handlerID)
 
 	connectionEpoch.Store(nowUTC().UnixNano())
@@ -188,19 +158,6 @@ func (a *App) Sync(ctx context.Context, opts SyncOptions) (SyncResult, error) {
 	if opts.OnConnected != nil {
 		opts.OnConnected()
 	}
-	// Ensure unavailable presence is sent on ALL post-connect exits
-	// (success, error, storage limit, reconnect failure), not just the
-	// success path. The websocket stays alive via DetachSocket, so the
-	// send can complete even after the sync context is cancelled.
-	defer func() {
-		ps.mu.Lock()
-		ps.cleanupStarted = true
-		ps.mu.Unlock()
-		a.wa.RemoveEventHandler(handlerID)
-		// No presence subscription goes out after this device leaves.
-		a.presenceWatch.stopRenewal()
-		a.sendPresenceBounded(types.PresenceUnavailable)
-	}()
 	now = nowUTC().UnixNano()
 	lastEvent.Store(now)
 	if err := a.migrateHistoricalLIDs(syncCtx); err != nil {
@@ -244,9 +201,9 @@ func (a *App) Sync(ctx context.Context, opts SyncOptions) (SyncResult, error) {
 
 	var err error
 	if opts.Mode == SyncModeFollow {
-		_, err = a.runSyncFollow(syncCtx, opts.MaxReconnect, opts.PresenceMode, &messagesStored, &connectionEpoch, disconnected, loggedOut, staleReconnect)
+		_, err = a.runSyncFollow(syncCtx, opts.MaxReconnect, &messagesStored, &connectionEpoch, disconnected, loggedOut, staleReconnect)
 	} else {
-		_, err = a.runSyncUntilIdle(syncCtx, opts.IdleExit, opts.MaxReconnect, opts.PresenceMode, &messagesStored, &lastEvent, disconnected, loggedOut)
+		_, err = a.runSyncUntilIdle(syncCtx, opts.IdleExit, opts.MaxReconnect, &messagesStored, &lastEvent, disconnected, loggedOut)
 	}
 	limitErr := limits.Err()
 	// Successful one-shot modes must finish queued downloads before cleanup
@@ -272,11 +229,10 @@ func (a *App) Sync(ctx context.Context, opts SyncOptions) (SyncResult, error) {
 
 func (a *App) connectForSync(ctx context.Context, opts SyncOptions) error {
 	connectOpts := wa.ConnectOptions{
-		AllowQR:                          opts.AllowQR,
-		OnQRCode:                         opts.OnQRCode,
-		PairPhoneNumber:                  opts.PairPhoneNumber,
-		OnPairCode:                       opts.OnPairCode,
-		SuppressInitialAvailablePresence: !opts.PresenceMode.SendsAvailablePresence(),
+		AllowQR:         opts.AllowQR,
+		OnQRCode:        opts.OnQRCode,
+		PairPhoneNumber: opts.PairPhoneNumber,
+		OnPairCode:      opts.OnPairCode,
 		// Only detach for already-authenticated sync, not for auth
 		// bootstrap (AllowQR / phone pairing) where caller
 		// cancellation must bound the QR/pairing flow.

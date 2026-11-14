@@ -63,18 +63,16 @@ func TestReadOnlyBuildRefusesSendingCommands(t *testing.T) {
 	}
 }
 
-// A running `sync --follow` answers other wacli processes over its socket.
-// Only the read-only requests get as far as doing any work: a delegated text
-// would otherwise fetch its link preview before the WAClient guard refuses
-// the send.
+// A running `sync --follow` answers other wacli processes over its socket,
+// and only for the two reads. The other names are what upstream's wacli asks.
 func TestDelegateRefusesEverythingButReads(t *testing.T) {
 	for _, kind := range []string{
 		"", "text", "file", "voice", "sticker", "react", "location", "poll", "poll_vote",
-		"button_list_select", "presence", presenceSubscribeKind, "edit",
-		markReadKind, markReadThroughKind, markReadReceiptsKind, chatStateKind, contactsSaveKind,
+		"button_list_select", "presence", "presence_subscribe", "edit",
+		"mark_read", "mark_read_through", "mark_read_receipts", "chat_state", "contacts_save",
 		"something-upstream-adds",
 	} {
-		_, err := executeDelegatedSend(context.Background(), nil, sendDelegateRequest{Version: sendDelegateVersion, Kind: kind})
+		_, err := executeDelegated(context.Background(), nil, delegateRequest{Version: delegateVersion, Kind: kind})
 		if !errors.Is(err, errReadOnlyBuild) {
 			t.Errorf("kind %q: err = %v, want errReadOnlyBuild", kind, err)
 		}

@@ -1,14 +1,9 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"encoding/base64"
 	"fmt"
-	"image"
-	"image/color"
-	stdraw "image/draw"
-	"image/jpeg"
 	_ "image/png"
 	"os"
 	"strings"
@@ -21,162 +16,14 @@ import (
 	"go.mau.fi/whatsmeow/types"
 )
 
-// profileMaxPx is the max dimension WhatsApp accepts for profile pictures.
-const profileMaxPx = 640
-const profileMaxInputBytes = 20 * 1024 * 1024
-const profileMaxInputPixels = 40_000_000
-
 func newProfileCmd(flags *rootFlags) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "profile",
 		Short: "Manage your WhatsApp profile",
 	}
-	cmd.AddCommand(newProfileSetPictureCmd(flags))
-	cmd.AddCommand(newProfileRemovePictureCmd(flags))
 	cmd.AddCommand(newProfilePictureInfoCmd(flags))
-	cmd.AddCommand(newProfileSetAboutCmd(flags))
 	cmd.AddCommand(newProfileGetAboutCmd(flags))
-	cmd.AddCommand(newProfileSetNameCmd(flags))
 	cmd.AddCommand(newProfileBusinessCmd(flags))
-	return cmd
-}
-
-func newProfileSetPictureCmd(flags *rootFlags) *cobra.Command {
-	cmd := &cobra.Command{
-		Use:   "set-picture <image>",
-		Short: "Set your WhatsApp profile picture (JPEG or PNG, auto-resized to <=640px)",
-		Args:  cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			if err := flags.requireWritable(); err != nil {
-				return err
-			}
-
-			imgBytes, err := readAsJPEG(args[0])
-			if err != nil {
-				return fmt.Errorf("read image: %w", err)
-			}
-
-			ctx, cancel := withTimeout(context.Background(), flags)
-			defer cancel()
-
-			a, lk, err := newApp(ctx, flags, true, false)
-			if err != nil {
-				return err
-			}
-			defer closeApp(a, lk)
-
-			if err := a.EnsureAuthed(ctx); err != nil {
-				return err
-			}
-			if err := a.Connect(ctx, false, nil); err != nil {
-				return err
-			}
-
-			pictureID, err := a.WA().SetProfilePicture(ctx, imgBytes)
-			if err != nil {
-				return fmt.Errorf("set profile picture: %w", err)
-			}
-
-			if flags.asJSON {
-				return out.WriteJSON(os.Stdout, map[string]any{"picture_id": pictureID})
-			}
-			fmt.Fprintf(os.Stdout, "Profile picture updated (id: %s)\n", pictureID)
-			return nil
-		},
-	}
-	return cmd
-}
-
-func newProfileRemovePictureCmd(flags *rootFlags) *cobra.Command {
-	cmd := &cobra.Command{
-		Use:   "remove-picture",
-		Short: "Remove your WhatsApp profile picture",
-		Args:  cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, args []string) error {
-			if err := flags.requireWritable(); err != nil {
-				return err
-			}
-			ctx, cancel, a, lk, err := openLiveProfileApp(flags, true)
-			if err != nil {
-				return err
-			}
-			defer cancel()
-			defer closeApp(a, lk)
-			pictureID, err := a.WA().SetProfilePicture(ctx, nil)
-			if err != nil {
-				return fmt.Errorf("remove profile picture: %w", err)
-			}
-			if flags.asJSON {
-				return out.WriteJSON(os.Stdout, map[string]any{"removed": true, "picture_id": pictureID})
-			}
-			fmt.Fprintln(os.Stdout, "Profile picture removed.")
-			return nil
-		},
-	}
-	return cmd
-}
-
-func newProfileSetAboutCmd(flags *rootFlags) *cobra.Command {
-	cmd := &cobra.Command{
-		Use:   "set-about <text>",
-		Short: "Set your WhatsApp profile About text",
-		Args:  cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			if err := flags.requireWritable(); err != nil {
-				return err
-			}
-			about := strings.TrimSpace(args[0])
-			if about == "" {
-				return fmt.Errorf("about text is required")
-			}
-			ctx, cancel, a, lk, err := openLiveProfileApp(flags, true)
-			if err != nil {
-				return err
-			}
-			defer cancel()
-			defer closeApp(a, lk)
-			if err := a.WA().SetStatusMessage(ctx, about); err != nil {
-				return fmt.Errorf("set profile about: %w", err)
-			}
-			if flags.asJSON {
-				return out.WriteJSON(os.Stdout, map[string]any{"about": about})
-			}
-			fmt.Fprintln(os.Stdout, "Profile About updated.")
-			return nil
-		},
-	}
-	return cmd
-}
-
-func newProfileSetNameCmd(flags *rootFlags) *cobra.Command {
-	cmd := &cobra.Command{
-		Use:   "set-name <name>",
-		Short: "Set your WhatsApp profile display name",
-		Args:  cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			if err := flags.requireWritable(); err != nil {
-				return err
-			}
-			name := strings.TrimSpace(args[0])
-			if name == "" {
-				return fmt.Errorf("profile name is required")
-			}
-			ctx, cancel, a, lk, err := openLiveProfileApp(flags, true)
-			if err != nil {
-				return err
-			}
-			defer cancel()
-			defer closeApp(a, lk)
-			if err := a.WA().SetProfileName(ctx, name); err != nil {
-				return fmt.Errorf("set profile name: %w", err)
-			}
-			if flags.asJSON {
-				return out.WriteJSON(os.Stdout, map[string]any{"name": name})
-			}
-			fmt.Fprintln(os.Stdout, "Profile name updated.")
-			return nil
-		},
-	}
 	return cmd
 }
 
@@ -391,73 +238,4 @@ func formatBusinessProfile(profile *types.BusinessProfile) businessProfileOutput
 		BusinessHoursTimeZone: profile.BusinessHoursTimeZone,
 		BusinessHours:         profile.BusinessHours,
 	}
-}
-
-// readAsJPEG reads the file at path, decodes it, resizes to <=profileMaxPx if
-// needed, and returns JPEG-encoded bytes suitable for WhatsApp.
-func readAsJPEG(path string) ([]byte, error) {
-	data, err := readRegularFileLimited(path, profileMaxInputBytes)
-	if err != nil {
-		return nil, err
-	}
-	cfg, _, err := image.DecodeConfig(bytes.NewReader(data))
-	if err != nil {
-		return nil, fmt.Errorf("unsupported image format: %w", err)
-	}
-	if cfg.Width <= 0 || cfg.Height <= 0 || cfg.Width > profileMaxInputPixels/cfg.Height {
-		return nil, fmt.Errorf("image dimensions are too large")
-	}
-
-	img, _, err := image.Decode(bytes.NewReader(data))
-	if err != nil {
-		return nil, fmt.Errorf("unsupported image format: %w", err)
-	}
-
-	img = resizeIfNeeded(img, profileMaxPx)
-
-	// Composite onto white background to flatten any alpha channel.
-	bounds := img.Bounds()
-	rgba := image.NewRGBA(bounds)
-	stdraw.Draw(rgba, bounds, &image.Uniform{color.White}, image.Point{}, stdraw.Src)
-	stdraw.Draw(rgba, bounds, img, bounds.Min, stdraw.Over)
-
-	var buf bytes.Buffer
-	if err := jpeg.Encode(&buf, rgba, &jpeg.Options{Quality: 85}); err != nil {
-		return nil, fmt.Errorf("encode jpeg: %w", err)
-	}
-	return buf.Bytes(), nil
-}
-
-// resizeIfNeeded returns a nearest-neighbour scaled copy of src when either
-// dimension exceeds maxPx, otherwise returns src unchanged.
-func resizeIfNeeded(src image.Image, maxPx int) image.Image {
-	b := src.Bounds()
-	w, h := b.Dx(), b.Dy()
-	if w <= maxPx && h <= maxPx {
-		return src
-	}
-	larger := w
-	if h > larger {
-		larger = h
-	}
-	nw := w * maxPx / larger
-	nh := h * maxPx / larger
-	if nw < 1 {
-		nw = 1
-	}
-	if nh < 1 {
-		nh = 1
-	}
-
-	dst := image.NewRGBA(image.Rect(0, 0, nw, nh))
-	scaleX := float64(w) / float64(nw)
-	scaleY := float64(h) / float64(nh)
-	for y := 0; y < nh; y++ {
-		for x := 0; x < nw; x++ {
-			srcX := b.Min.X + int(float64(x)*scaleX)
-			srcY := b.Min.Y + int(float64(y)*scaleY)
-			dst.Set(x, y, src.At(srcX, srcY))
-		}
-	}
-	return dst
 }

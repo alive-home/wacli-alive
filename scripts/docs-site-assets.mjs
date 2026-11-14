@@ -4,7 +4,7 @@ export function css() {
 :root[data-theme="dark"]{color-scheme:dark;--ink:#ecf2ee;--text:#c8d3ce;--muted:#8a978f;--subtle:#5d6b66;--bg:#0a1411;--paper:#0f1a16;--accent:#25d366;--accent-soft:rgba(37,211,102,.14);--accent-strong:#3ee07a;--accent-on:#062018;--line:#1d2a25;--line-soft:#16201c;--code-bg:#04100c;--code-fg:#d6e5dd;--code-border:#1d3a32;--code-scroll:#27554a;--brand-mark-bg:rgba(37,211,102,.18);--prompt:#7ba398;--shadow-soft:0 4px 18px rgba(0,0,0,.45);--shadow-mobile:0 18px 40px rgba(0,0,0,.6)}
 *{box-sizing:border-box}
 html{scroll-behavior:smooth;scroll-padding-top:24px}
-body{margin:0;background:var(--bg);color:var(--text);font-family:"Inter",ui-sans-serif,system-ui,-apple-system,Segoe UI,sans-serif;line-height:1.65;overflow-x:hidden;-webkit-font-smoothing:antialiased;font-feature-settings:"cv02","cv03","cv04","cv11";transition:background .2s,color .2s}
+body{margin:0;background:var(--bg);color:var(--text);font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,sans-serif;line-height:1.65;overflow-x:hidden;-webkit-font-smoothing:antialiased;transition:background .2s,color .2s}
 ::selection{background:var(--accent);color:var(--accent-on)}
 a{color:var(--accent);text-decoration:none;transition:color .12s}
 a:hover{text-decoration:underline;text-underline-offset:.2em}
@@ -52,7 +52,7 @@ main{min-width:0;padding:32px clamp(20px,4.5vw,56px) 80px;max-width:1180px;margi
 .home-cta .btn-primary{background:var(--accent);color:var(--accent-on);border:1px solid var(--accent)}
 .home-cta .btn-primary:hover{background:var(--accent-strong);border-color:var(--accent-strong);text-decoration:none;color:var(--accent-on)}
 .home-cta .btn-ghost{padding:0 16px}
-.home-install{display:flex;align-items:center;gap:14px;min-height:46px;background:var(--code-bg);color:var(--code-fg);border-radius:10px;padding:5px 10px 5px 18px;font:500 .95rem/1.2 "JetBrains Mono","SF Mono",ui-monospace,monospace;max-width:34em;border:1px solid var(--code-border)}
+.home-install{display:flex;align-items:center;gap:14px;min-height:46px;background:var(--code-bg);color:var(--code-fg);border-radius:10px;padding:5px 10px 5px 18px;font:500 .95rem/1.2 ui-monospace,"SF Mono",Menlo,monospace;max-width:34em;border:1px solid var(--code-border)}
 .home-install .prompt{color:var(--prompt);user-select:none;flex:0 0 auto}
 .home-install code{flex:1 1 auto;background:transparent;border:0;color:var(--code-fg);font:inherit;padding:0;white-space:pre;overflow:auto}
 .home-services{display:flex;flex-wrap:wrap;gap:6px;margin:6px 0 18px}
@@ -77,7 +77,7 @@ body:not(.home) .doc>h1:first-child{display:none}
 .doc li>p{margin:0 0 .4em}
 .doc strong{font-weight:600;color:var(--ink)}
 .doc em{font-style:italic}
-.doc code{font-family:"JetBrains Mono","SF Mono",ui-monospace,monospace;font-size:.84em;background:var(--line-soft);border:1px solid var(--line);border-radius:5px;padding:.08em .35em;color:var(--ink)}
+.doc code{font-family:ui-monospace,"SF Mono",Menlo,monospace;font-size:.84em;background:var(--line-soft);border:1px solid var(--line);border-radius:5px;padding:.08em .35em;color:var(--ink)}
 .doc pre{position:relative;overflow:auto;background:var(--code-bg);color:var(--code-fg);border-radius:8px;padding:18px 22px;margin:1.3em 0;font-size:.85em;line-height:1.6;scrollbar-width:thin;scrollbar-color:var(--code-scroll) transparent;border:1px solid var(--code-border)}
 .doc pre::-webkit-scrollbar{height:8px;width:8px}
 .doc pre::-webkit-scrollbar-thumb{background:var(--code-scroll);border-radius:8px}
@@ -275,10 +275,10 @@ export function socialCardSvg() {
     <rect width="128" height="128" rx="28" fill="#12231d"/>
     <path d="M64 22a42 42 0 0 0-36.08 63.38L22 106l21.38-5.63A42 42 0 1 0 64 22Zm24.6 59.55c-1.03 2.9-6.01 5.5-8.4 5.76-2.14.23-4.85.32-7.86-.48a43.5 43.5 0 0 1-7.12-2.67C52.68 78.72 44.53 66.03 43.88 65.23c-.57-.84-5-6.68-5-12.73 0-6.01 3.17-8.97 4.27-10.2 1.1-1.22 2.39-1.53 3.2-1.53.8 0 1.62 0 2.29.04.76.04 1.76-.29 2.73 2.06 1.03 2.56 3.47 8.59 3.76 9.26.32.65.52 1.39.1 2.23-.42.84-.65 1.35-1.3 2.1-.65.74-1.36 1.62-1.95 2.2-.65.65-1.34 1.3-.57 2.56.74 1.26 3.36 5.53 7.21 8.94 4.96 4.39 9.16 5.76 10.42 6.37 1.26.65 2 .52 2.71-.32.74-.88 3.13-3.65 3.97-4.9.84-1.26 1.68-1.03 2.86-.65 1.15.42 7.35 3.47 8.59 4.1 1.28.65 2.1.97 2.39 1.49.32.55.32 3.11-.71 6.01Z" fill="#25d366"/>
   </g>
-  <text x="114" y="315" fill="#ffffff" font-family="Inter, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="104" font-weight="700">wacli</text>
-  <text x="114" y="388" fill="#dcfce7" font-family="Inter, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="44" font-weight="600">Read WhatsApp in your terminal</text>
-  <text x="114" y="468" fill="#b7c8c0" font-family="JetBrains Mono, ui-monospace, SFMono-Regular, Menlo, monospace" font-size="32">$ make build</text>
-  <g fill="#9af1b7" font-family="Inter, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="28" font-weight="600">
+  <text x="114" y="315" fill="#ffffff" font-family="system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="104" font-weight="700">wacli</text>
+  <text x="114" y="388" fill="#dcfce7" font-family="system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="44" font-weight="600">Read WhatsApp in your terminal</text>
+  <text x="114" y="468" fill="#b7c8c0" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="32">$ make build</text>
+  <g fill="#9af1b7" font-family="system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="28" font-weight="600">
     <text x="742" y="150">sync</text>
     <text x="857" y="150">search</text>
     <text x="1002" y="150">read</text>

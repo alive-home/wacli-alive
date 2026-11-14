@@ -2,7 +2,6 @@ package wa
 
 import (
 	"context"
-	"errors"
 	"testing"
 
 	"go.mau.fi/whatsmeow/appstate"
@@ -125,89 +124,4 @@ func TestSDKContactStoreWritesAreJournaledInApplicationOrder(t *testing.T) {
 			t.Fatalf("journal[%d] = %+v, want %+v", i, got, w)
 		}
 	}
-}
-
-type failingAppStateStore struct {
-	waStore.AppStateStore
-	err error
-}
-
-func (s failingAppStateStore) PutAppStateVersion(context.Context, string, uint64, [128]byte) error {
-	return s.err
-}
-
-// The open session's app-state store is wrapped so the journal sees the
-// collection cursor writes; a failed write is not counted. Coverage decides
-// from the cursor writes and the own name's position in the same sequence.
-func TestContactStoreJournalCoverage(t *testing.T) {
-	c, err := New(Options{StorePath: newPairedSessionStore(t), KeyStateStore: newTestKeyStateStore(t)})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer c.Close()
-	journal := c.ContactJournal()
-	ctx := t.Context()
-	name := string(appstate.WAPatchCriticalUnblockLow)
-	own := types.NewJID("15550001111", types.DefaultUserServer)
-	other := types.NewJID("15550002222", types.DefaultUserServer)
-	cursor := func(version uint64) {
-		t.Helper()
-		if err := c.client.Store.AppState.PutAppStateVersion(ctx, name, version, [128]byte{}); err != nil {
-			t.Fatal(err)
-		}
-	}
-	write := func(jid types.JID) {
-		t.Helper()
-		if err := c.client.Store.Contacts.PutContactName(ctx, jid, "First", "Full Name"); err != nil {
-			t.Fatal(err)
-		}
-	}
-	cases := []struct {
-		name        string
-		steps       func()
-		covered     bool
-		ownWritten  bool
-		wantCursors uint64
-	}{
-		{"nothing consumed", func() {}, true, false, 0},
-		{"own patch applied", func() { cursor(81); write(own) }, true, true, 1},
-		{"one patch without the own name", func() { cursor(81); write(other) }, false, false, 1},
-		{"own name written before the only move", func() { write(own); cursor(81) }, false, true, 1},
-		{"two patches", func() { cursor(81); cursor(82); write(other); write(own) }, false, true, 2},
-		{"a deleted version counts", func() {
-			if err := c.client.Store.AppState.DeleteAppStateVersion(ctx, name); err != nil {
-				t.Fatal(err)
-			}
-			cursor(81)
-			write(own)
-		}, false, true, 2},
-		{"another collection does not count", func() {
-			if err := c.client.Store.AppState.PutAppStateVersion(ctx, string(appstate.WAPatchRegularLow), 9, [128]byte{}); err != nil {
-				t.Fatal(err)
-			}
-			cursor(81)
-			write(own)
-		}, true, true, 1},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			start := journal.Mark(name)
-			tc.steps()
-			covered, ownWritten, end := journal.Coverage(name, own, start)
-			if covered != tc.covered || ownWritten != tc.ownWritten || end.CursorWrites-start.CursorWrites != tc.wantCursors {
-				t.Fatalf("Coverage = covered %v, own written %v, cursor writes %d; want %v, %v, %d",
-					covered, ownWritten, end.CursorWrites-start.CursorWrites, tc.covered, tc.ownWritten, tc.wantCursors)
-			}
-		})
-	}
-	t.Run("a failed cursor write is not counted", func(t *testing.T) {
-		failing := journal.AppStateStore(failingAppStateStore{AppStateStore: c.client.Store.AppState, err: errors.New("disk full")})
-		start := journal.Mark(name)
-		if err := failing.PutAppStateVersion(ctx, name, 99, [128]byte{}); err == nil {
-			t.Fatal("test setup: write did not fail")
-		}
-		if end := journal.Mark(name); end != start {
-			t.Fatalf("mark moved from %+v to %+v on a failed write", start, end)
-		}
-	})
 }

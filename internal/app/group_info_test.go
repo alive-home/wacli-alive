@@ -213,7 +213,6 @@ func TestGroupChangeEventsAskForGroupInfoAgain(t *testing.T) {
 		func(string, string) {},
 		nil,
 		nil,
-		&syncPresence{},
 		nil,
 	)
 	defer f.RemoveEventHandler(handlerID)

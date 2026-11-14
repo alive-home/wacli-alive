@@ -72,7 +72,7 @@ func TestOutgoingReceiptValidation(t *testing.T) {
 			a.opts.Events = out.NewEventWriter(&log, true)
 			var stored, last atomic.Int64
 			limits := &syncStorageLimits{app: a}
-			a.addSyncEventHandler(t.Context(), SyncOptions{}, &stored, &last, make(chan struct{}, 1), make(chan struct{}, 1), make(chan staleReconnectRequest, 1), nil, nil, limits, &syncPresence{}, nil)
+			a.addSyncEventHandler(t.Context(), SyncOptions{}, &stored, &last, make(chan struct{}, 1), make(chan struct{}, 1), make(chan staleReconnectRequest, 1), nil, nil, limits, nil)
 			if tc.closeDB {
 				if err := a.db.Close(); err != nil {
 					t.Fatal(err)

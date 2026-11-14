@@ -67,7 +67,7 @@ func newAuthCmd(flags *rootFlags) *cobra.Command {
 	addAuthFlags(cmd, &opts)
 
 	cmd.AddCommand(newAuthStatusCmd(flags))
-	cmd.AddCommand(newAuthLogoutCmd(flags))
+	cmd.AddCommand(newLocalLogoutCmd(flags))
 
 	return cmd
 }
@@ -414,40 +414,4 @@ func phoneFromLinkedJID(linkedJID string) string {
 		return ""
 	}
 	return phone
-}
-
-func newAuthLogoutCmd(flags *rootFlags) *cobra.Command {
-	return &cobra.Command{
-		Use:   "logout",
-		Short: "Logout (invalidate session)",
-		RunE: func(cmd *cobra.Command, args []string) error {
-			if err := flags.requireWritable(); err != nil {
-				return err
-			}
-			ctx, cancel := withTimeout(context.Background(), flags)
-			defer cancel()
-
-			a, lk, err := newApp(ctx, flags, true, true)
-			if err != nil {
-				return err
-			}
-			defer closeApp(a, lk)
-
-			if err := a.EnsureAuthed(ctx); err != nil {
-				return err
-			}
-			if err := a.Connect(ctx, false, nil); err != nil {
-				return err
-			}
-			if err := a.WA().Logout(ctx); err != nil {
-				return err
-			}
-
-			if flags.asJSON {
-				return out.WriteJSON(os.Stdout, map[string]any{"logged_out": true})
-			}
-			fmt.Fprintln(os.Stdout, "Logged out.")
-			return nil
-		},
-	}
 }

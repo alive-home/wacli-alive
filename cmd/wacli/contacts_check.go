@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"strings"
 
 	"github.com/openclaw/wacli/internal/out"
 	"github.com/openclaw/wacli/internal/wa"
@@ -93,13 +92,13 @@ func runContactsCheck(flags *rootFlags, args []string) error {
 
 	a, lk, err := newApp(ctx, flags, true, false)
 	if err != nil {
-		resp, delegated, delegateErr := tryDelegateSend(ctx, flags, err, sendDelegateRequest{
+		resp, delegated, delegateErr := tryDelegate(ctx, flags, err, delegateRequest{
 			Kind:   contactsCheckKind,
 			Phones: args,
 		})
 		if delegated {
 			if delegateErr != nil {
-				return explainContactsCheckDelegateError(delegateErr)
+				return delegateErr
 			}
 			return writeContactCheckResults(flags, resp.Contacts)
 		}
@@ -123,23 +122,15 @@ func runContactsCheck(flags *rootFlags, args []string) error {
 
 // executeDelegatedContactsCheck runs the lookup on the follow process's
 // connected session, so the caller never needs the store lock.
-func executeDelegatedContactsCheck(ctx context.Context, checker registrationChecker, req sendDelegateRequest) (sendDelegateResponse, error) {
+func executeDelegatedContactsCheck(ctx context.Context, checker registrationChecker, req delegateRequest) (delegateResponse, error) {
 	if len(req.Phones) == 0 {
-		return sendDelegateResponse{}, fmt.Errorf("at least one phone is required")
+		return delegateResponse{}, fmt.Errorf("at least one phone is required")
 	}
 	results, err := checkRegistrations(ctx, checker, req.Phones)
 	if err != nil {
-		return sendDelegateResponse{}, err
+		return delegateResponse{}, err
 	}
-	return sendDelegateResponse{OK: true, Contacts: results}, nil
-}
-
-// explainContactsCheckDelegateError turns an older daemon's rejection into the action to take.
-func explainContactsCheckDelegateError(err error) error {
-	if err == nil || !strings.Contains(err.Error(), "unsupported send kind") || !strings.Contains(err.Error(), contactsCheckKind) {
-		return err
-	}
-	return fmt.Errorf("the running sync process does not support contacts check; restart `wacli sync` after upgrading, then run this again: %w", err)
+	return delegateResponse{OK: true, Contacts: results}, nil
 }
 
 func writeContactCheckResults(flags *rootFlags, results []contactCheckResult) error {

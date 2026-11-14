@@ -4,10 +4,11 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
-	appStore "github.com/openclaw/wacli/internal/store"
 	"path/filepath"
 	"testing"
 	"time"
+
+	appStore "github.com/openclaw/wacli/internal/store"
 
 	"go.mau.fi/whatsmeow/appstate"
 	"go.mau.fi/whatsmeow/proto/waE2E"

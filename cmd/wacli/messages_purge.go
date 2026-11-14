@@ -70,7 +70,7 @@ restore the payload. Live messages must first receive an explicit deletion event
 			if err != nil {
 				return fmt.Errorf("load retained local media paths: %w", err)
 			}
-			if _, err := deleteLocalMediaPathsIfRequested(true, mediaPaths); err != nil {
+			if err := removeLocalMedia(mediaPaths); err != nil {
 				return fmt.Errorf("delete retained local media: %w", err)
 			}
 			if err := a.DB().PurgeMessage(chat, id); err != nil {
@@ -91,4 +91,18 @@ restore the payload. Live messages must first receive an explicit deletion event
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "show the retained payload without purging it")
 	cmd.Flags().BoolVar(&confirm, "confirm", false, "skip confirmation prompt")
 	return cmd
+}
+
+// removeLocalMedia deletes the downloaded files of a message. A file that is
+// already gone is fine.
+func removeLocalMedia(paths []string) error {
+	for _, path := range paths {
+		if strings.TrimSpace(path) == "" {
+			continue
+		}
+		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+			return err
+		}
+	}
+	return nil
 }

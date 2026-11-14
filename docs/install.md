@@ -60,7 +60,7 @@ wacli --help
 
 ## Development builds
 
-Install Node.js 24 or newer and the pnpm version pinned in `package.json`. Corepack users can run `corepack pnpm install --frozen-lockfile` from the checkout to download and verify that pinned version.
+Install [Bun](https://bun.sh); it runs the scripts in `package.json`. There are no packages to install.
 
 ```bash
 make build
@@ -68,7 +68,7 @@ make check
 ./dist/wacli --version
 ```
 
-The Makefile is a thin wrapper over the pnpm scripts. `make build` writes `./dist/wacli`; `make check` runs the complete local gate.
+The Makefile is a thin wrapper over those scripts. `make build` writes `./dist/wacli`; `make check` runs the complete local gate.
 
 Development and Docker builds select Go 1.27.3 for its compiler, runtime, cgo, and standard-library security fixes. The `toolchain` directive in `go.mod` selects that build version without raising the Go 1.27.0 source minimum; normal Go toolchain auto-selection downloads it when needed.
 

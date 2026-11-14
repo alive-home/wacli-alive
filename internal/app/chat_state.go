@@ -2,28 +2,20 @@ package app
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"fmt"
 	"slices"
-	"strings"
 	"sync"
 	"time"
 
-	"github.com/openclaw/wacli/internal/store"
 	"github.com/openclaw/wacli/internal/wa"
 	"go.mau.fi/whatsmeow/appstate"
-	"go.mau.fi/whatsmeow/proto/waCommon"
 	"go.mau.fi/whatsmeow/proto/waSyncAction"
 	"go.mau.fi/whatsmeow/types"
 	"go.mau.fi/whatsmeow/types/events"
-	"google.golang.org/protobuf/proto"
 )
 
 const (
-	appStateRetryInitialDelay = 250 * time.Millisecond
-	appStateRetryMaxDelay     = 5 * time.Second
-	appStateRecoveryMaxWait   = 5 * time.Minute
 	// How long a background continuation keeps waiting for a recovery the
 	// primary answers after the synchronous waiter gave up. Real phones have
 	// been observed to answer 71 seconds and even hours later.
@@ -33,9 +25,10 @@ const (
 	backgroundAppStateRecoveryInterval = 6 * time.Hour
 )
 
-// AddChatStatePersistenceHandler captures app-state events that arrive while a
-// one-shot chat-state command is connected. Remove it only after closing the
-// connection so whatsmeow cannot advance another collection without persisting it.
+// AddChatStatePersistenceHandler stores the app-state events the client
+// dispatches, the way a running sync does, without syncing. No command uses
+// it: it is how tests, wa_test's against the real SDK client among them,
+// drive app-state persistence on its own.
 func (a *App) AddChatStatePersistenceHandler(ctx context.Context) (func(), error) {
 	if err := a.OpenWA(); err != nil {
 		return nil, err
@@ -59,138 +52,6 @@ func (a *App) AddChatStatePersistenceHandler(ctx context.Context) (func(), error
 	}, nil
 }
 
-func (a *App) ArchiveChat(ctx context.Context, jid types.JID, archive bool) error {
-	release, err := a.beginChatStateWrite(ctx, appstate.WAPatchRegularLow)
-	if err != nil {
-		return err
-	}
-	defer release()
-	chatJID := canonicalJIDString(a.canonicalStoreJID(ctx, jid))
-	pending, err := a.beginLocalAppStateWrite(appstate.WAPatchRegularLow)
-	if err != nil {
-		return err
-	}
-	archiveTime := nowUTC()
-	postSendEvents, err := a.wa.ArchiveChat(ctx, jid, archive, archiveTime, nil, func() { pending.reserve(a) })
-	if err != nil {
-		return errors.Join(err, a.failLocalAppStateWrite(ctx, &pending, postSendEvents))
-	}
-	if !pending.reserved {
-		return fmt.Errorf("WhatsApp app state send completed without an apply boundary")
-	}
-	return a.completeLocalAppStateWrite(ctx, &pending, postSendEvents, func() error {
-		return a.db.ApplyChatArchive(chatJID, archive, archiveTime)
-	})
-}
-
-func (a *App) PinChat(ctx context.Context, jid types.JID, pin bool) error {
-	release, err := a.beginChatStateWrite(ctx, appstate.WAPatchRegularLow)
-	if err != nil {
-		return err
-	}
-	defer release()
-	chatJID := canonicalJIDString(a.canonicalStoreJID(ctx, jid))
-	pending, err := a.beginLocalAppStateWrite(appstate.WAPatchRegularLow)
-	if err != nil {
-		return err
-	}
-	postSendEvents, err := a.wa.PinChat(ctx, jid, pin, func() { pending.reserve(a) })
-	if err != nil {
-		return errors.Join(err, a.failLocalAppStateWrite(ctx, &pending, postSendEvents))
-	}
-	if !pending.reserved {
-		return fmt.Errorf("WhatsApp app state send completed without an apply boundary")
-	}
-	return a.completeLocalAppStateWrite(ctx, &pending, postSendEvents, func() error {
-		return a.db.SetChatPinned(chatJID, pin)
-	})
-}
-
-func (a *App) MuteChat(ctx context.Context, jid types.JID, mute bool, duration time.Duration) error {
-	release, err := a.beginChatStateWrite(ctx, appstate.WAPatchRegularHigh)
-	if err != nil {
-		return err
-	}
-	defer release()
-	chatJID := canonicalJIDString(a.canonicalStoreJID(ctx, jid))
-	mutedUntil := mutedUntilUnix(mute, duration, nowUTC())
-	pending, err := a.beginLocalAppStateWrite(appstate.WAPatchRegularHigh)
-	if err != nil {
-		return err
-	}
-	postSendEvents, err := a.wa.MuteChat(ctx, jid, mute, duration, func() { pending.reserve(a) })
-	if err != nil {
-		return errors.Join(err, a.failLocalAppStateWrite(ctx, &pending, postSendEvents))
-	}
-	if !pending.reserved {
-		return fmt.Errorf("WhatsApp app state send completed without an apply boundary")
-	}
-	return a.completeLocalAppStateWrite(ctx, &pending, postSendEvents, func() error {
-		return a.db.SetChatMutedUntil(chatJID, mutedUntil)
-	})
-}
-
-func (a *App) MarkChatRead(ctx context.Context, jid types.JID, read bool) error {
-	return a.markChatRead(ctx, jid, read, "")
-}
-
-// MarkChatReadThrough fixes the inbound read position before recovery or a
-// network write. Recovery must never extend what the caller has actually read.
-func (a *App) MarkChatReadThrough(ctx context.Context, jid types.JID, messageID string) error {
-	if strings.TrimSpace(messageID) == "" {
-		return fmt.Errorf("--through-message-id requires an exact nonempty message ID")
-	}
-	return a.markChatRead(ctx, jid, true, messageID)
-}
-
-func (a *App) markChatRead(ctx context.Context, jid types.JID, read bool, throughID string) error {
-	var chatJID string
-	var lastTS time.Time
-	var lastKey *waCommon.MessageKey
-	if throughID != "" {
-		chatJID = canonicalJIDString(a.canonicalStoreJID(ctx, jid))
-		m, err := a.db.ReadBoundary(chatJID, throughID)
-		if err != nil {
-			return err
-		}
-		lastTS, lastKey = m.Timestamp, messageKeyFromStore(m)
-	}
-	release, err := a.beginChatStateWrite(ctx, appstate.WAPatchRegularLow)
-	if err != nil {
-		return err
-	}
-	defer release()
-	if throughID == "" {
-		// Keep legacy resolution and latest-message capture after recovery.
-		chatJID = canonicalJIDString(a.canonicalStoreJID(ctx, jid))
-		lastTS, lastKey = a.latestMessageRange(chatJID)
-	}
-	pending, err := a.beginLocalAppStateWrite(appstate.WAPatchRegularLow)
-	if err != nil {
-		return err
-	}
-	postSendEvents, err := a.wa.MarkChatAsRead(ctx, jid, read, lastTS, lastKey, func() { pending.reserve(a) })
-	if err != nil {
-		return errors.Join(err, a.failLocalAppStateWrite(ctx, &pending, postSendEvents))
-	}
-	if !pending.reserved {
-		return fmt.Errorf("WhatsApp app state send completed without an apply boundary")
-	}
-	return a.completeLocalAppStateWrite(ctx, &pending, postSendEvents, func() error {
-		if !read {
-			return a.db.SetChatUnread(chatJID, true)
-		}
-		var ids []string
-		if lastKey != nil {
-			ids = []string{lastKey.GetID()}
-		}
-		if throughID != "" {
-			return a.db.ClearChatUnreadThroughPreservingMarker(chatJID, lastTS, ids)
-		}
-		return a.db.ClearChatUnreadThrough(chatJID, lastTS, ids)
-	})
-}
-
 func (a *App) acquireChatStateSync(ctx context.Context) (func(), error) {
 	select {
 	case <-ctx.Done():
@@ -203,94 +64,6 @@ func (a *App) acquireChatStateSync(ctx context.Context) (func(), error) {
 		return nil, fmt.Errorf("wait for chat state synchronization: %w", err)
 	}
 	return release, nil
-}
-
-func (a *App) beginChatStateWrite(ctx context.Context, collection appstate.WAPatchName) (func(), error) {
-	release, err := a.acquireChatStateSync(ctx)
-	if err != nil {
-		return nil, err
-	}
-	if err := a.syncChatStateBeforeWrite(ctx, collection); err != nil {
-		release()
-		return nil, err
-	}
-	return release, nil
-}
-
-func (a *App) syncChatStateBeforeWrite(ctx context.Context, collection appstate.WAPatchName) error {
-	markerGeneration, recoveryRequired, err := a.db.BeginAppStateRecovery(string(collection))
-	if err != nil {
-		return fmt.Errorf("begin WhatsApp app state recovery for %s: %w", collection, err)
-	}
-	tracker := &appStatePersistenceTracker{}
-	if recoveryRequired {
-		if handled, degradedErr := a.degradedAppStateReplay(ctx, collection, markerGeneration, tracker); handled {
-			return degradedErr
-		}
-		return a.replayRequiredAppState(ctx, collection, markerGeneration, tracker)
-	}
-
-	for {
-		err, persistenceErr := a.fetchAndPersistAppState(ctx, collection, false, tracker)
-		if persistenceErr != nil {
-			return fmt.Errorf("persist fetched app state %s: %w", collection, persistenceErr)
-		}
-		if err == nil {
-			return a.clearCompletedAppStateRecovery(collection, markerGeneration)
-		}
-
-		if errors.Is(err, appstate.ErrMismatchingLTHash) || errors.Is(err, wa.ErrEmptyAppStateKeyShare) {
-			return a.replayRequiredAppState(ctx, collection, markerGeneration, tracker)
-		} else if errors.Is(err, appstate.ErrKeyNotFound) {
-			return a.replayRequiredAppState(ctx, collection, markerGeneration, tracker)
-		} else {
-			return fmt.Errorf("sync WhatsApp chat state before update: %w", err)
-		}
-	}
-}
-
-func (a *App) replayRequiredAppState(ctx context.Context, collection appstate.WAPatchName, markerGeneration int64, tracker *appStatePersistenceTracker) error {
-	ctx, cancel := context.WithTimeout(ctx, appStateRecoveryMaxWait)
-	defer cancel()
-	retryDelay := appStateRetryInitialDelay
-	for {
-		fetchErr, persistenceErr := a.fetchAndPersistAppState(ctx, collection, true, tracker)
-		if persistenceErr != nil {
-			return fmt.Errorf("persist replayed app state %s: %w", collection, persistenceErr)
-		}
-		if fetchErr == nil {
-			return a.clearCompletedAppStateRecovery(collection, markerGeneration)
-		}
-		// An ErrMismatchingLTHash here just armed (and persisted) the "full
-		// sync does not verify" flag, but with stock whatsmeow the failed full
-		// sync already deleted the saved collection version, so the degraded
-		// incremental path cannot engage until a primary recovery snapshot
-		// restores local state. Later writes check the persisted flag before
-		// starting another destructive full sync.
-		if errors.Is(fetchErr, appstate.ErrMismatchingLTHash) || errors.Is(fetchErr, wa.ErrEmptyAppStateKeyShare) {
-			return a.recoverMismatchingAppState(ctx, collection, markerGeneration, tracker, nil)
-		}
-		if !errors.Is(fetchErr, appstate.ErrKeyNotFound) {
-			return fmt.Errorf("replay WhatsApp app state recovery for %s: %w", collection, fetchErr)
-		}
-		// whatsmeow requests the missing keys when patch decoding returns
-		// ErrKeyNotFound. Keep the connection alive for that delivery, bounded
-		// so one absent key cannot hold all chat-state writes forever.
-
-		timer := time.NewTimer(retryDelay)
-		select {
-		case <-ctx.Done():
-			timer.Stop()
-			return fmt.Errorf("wait for missing WhatsApp app state key during %s recovery: %w", collection, ctx.Err())
-		case <-timer.C:
-		}
-		if retryDelay < appStateRetryMaxDelay {
-			retryDelay *= 2
-			if retryDelay > appStateRetryMaxDelay {
-				retryDelay = appStateRetryMaxDelay
-			}
-		}
-	}
 }
 
 // setAppStateFullSyncResult records whether the latest full sync of the
@@ -348,55 +121,6 @@ func (a *App) loadAppStateFullSyncResultsLocked() {
 	for _, collection := range collections {
 		a.appStateFullSyncBroken[collection] = true
 	}
-}
-
-// degradedAppStateReplay handles pre-write replay debt on collections whose
-// full sync is known not to verify. Replaying there repeats the very full sync
-// that already failed — destroying the local collection version with stock
-// whatsmeow — and then waits up to appStateRecoveryMaxWait for the primary,
-// which is often asleep. Instead, with local state present, an incremental
-// fetch from the local version confirms the server accepted our patches and
-// the write proceeds. Only this attempt's own write-ahead marker is cleared:
-// older intents can stand for mutations whatsmeow's cursor already consumed
-// but wacli.db never persisted, and an empty incremental delta is not a
-// replay of those, so that debt stays durable until a verified full replay or
-// a primary recovery snapshot covers it (both clear through their own, newer
-// generation). One background recovery request per collection per 6h still
-// nudges the primary, since only it can repair the broken full sync.
-//
-// Returns handled=false (fall back to today's full replay + phone wait) when
-// the flag is not set, there is no local state, or the incremental fetch
-// fails.
-func (a *App) degradedAppStateReplay(ctx context.Context, collection appstate.WAPatchName, markerGeneration int64, tracker *appStatePersistenceTracker) (handled bool, err error) {
-	if !a.isAppStateFullSyncBroken(collection) {
-		return false, nil
-	}
-	hasLocal, err := a.wa.HasLocalAppState(ctx, string(collection))
-	if err != nil {
-		a.warnAppStateRecovery(string(collection), fmt.Errorf("check local app state before degraded replay: %w", err))
-		return false, nil
-	}
-	if !hasLocal {
-		return false, nil
-	}
-	fetchErr, persistenceErr := a.fetchAndPersistAppState(ctx, collection, false, tracker)
-	if persistenceErr != nil {
-		return true, fmt.Errorf("persist degraded app state replay %s: %w", collection, persistenceErr)
-	}
-	if fetchErr != nil {
-		// LTHash mismatch (or any other failure): today's behavior.
-		return false, nil
-	}
-	a.emitWarning("app_state_degraded_replay",
-		fmt.Sprintf("app state %s: full sync is known not to verify on this account; proceeding after an incremental sync and keeping the durable replay debt", collection),
-		map[string]any{"name": string(collection), "generation": markerGeneration})
-	a.requestBackgroundAppStateRecovery(ctx, collection, markerGeneration)
-	// Clear only this attempt's own write-ahead marker; see the function
-	// comment for why older intents must survive an empty incremental delta.
-	if err := a.db.ClearAppStateRecoveryIntent(string(collection), markerGeneration); err != nil {
-		return true, fmt.Errorf("clear degraded replay marker for %s: %w", collection, err)
-	}
-	return true, nil
 }
 
 // requestBackgroundAppStateRecovery sends one recovery request to the primary
@@ -682,7 +406,7 @@ func (a *App) fetchAndPersistAppState(ctx context.Context, collection appstate.W
 		if collection == appstate.WAPatchCriticalUnblockLow {
 			// Drain even without events or after fetch cancellation: SDK store
 			// writes precede event delivery and must retain their canonical JID.
-			_, drainErr := a.drainContactJournal(persistCtx)
+			drainErr := a.drainContactJournal(persistCtx)
 			persistErr = errors.Join(persistErr, drainErr)
 		}
 		result <- persistErr
@@ -734,114 +458,12 @@ func (a *App) clearCompletedAppStateRecovery(collection appstate.WAPatchName, ma
 	return nil
 }
 
-type pendingLocalAppStateWrite struct {
-	collection appstate.WAPatchName
-	generation int64
-	once       sync.Once
-	ticket     uint64
-	reserved   bool
-}
-
-func (p *pendingLocalAppStateWrite) reserve(a *App) {
-	p.once.Do(func() {
-		p.ticket = a.appStatePersist.reserve()
-		p.reserved = true
-	})
-}
-
-func (a *App) beginLocalAppStateWrite(collection appstate.WAPatchName) (pendingLocalAppStateWrite, error) {
-	generation, err := a.db.MarkAppStateRecoveryGeneration(string(collection))
-	if err != nil {
-		return pendingLocalAppStateWrite{}, fmt.Errorf("mark local WhatsApp app state recovery for %s: %w", collection, err)
-	}
-	// Keep this exact intent until a later pre-write replay. Other queued work
-	// clears only its own generation and cannot erase an unfinished send.
-	return pendingLocalAppStateWrite{collection: collection, generation: generation}, nil
-}
-
-func (a *App) failLocalAppStateWrite(ctx context.Context, pending *pendingLocalAppStateWrite, postSendEvents []any) error {
-	if !pending.reserved {
-		return nil
-	}
-	result := make(chan error, 1)
-	persistCtx := context.WithoutCancel(ctx)
-	frontier := a.appStatePersist.complete(pending.ticket, func() {
-		tracker := &appStatePersistenceTracker{}
-		result <- a.persistFetchedAppStateEvents(persistCtx, postSendEvents, tracker)
-	})
-	if err := a.appStatePersist.waitThrough(persistCtx, frontier); err != nil {
-		return err
-	}
-	return <-result
-}
-
-func (a *App) completeLocalAppStateWrite(ctx context.Context, pending *pendingLocalAppStateWrite, postSendEvents []any, persist func() error) error {
-	result := make(chan error, 1)
-	persistCtx := context.WithoutCancel(ctx)
-	frontier := a.appStatePersist.complete(pending.ticket, func() {
-		localErr := persist()
-		tracker := &appStatePersistenceTracker{}
-		eventsErr := a.persistFetchedAppStateEvents(persistCtx, postSendEvents, tracker)
-		persistErr := localErr
-		if persistErr == nil {
-			persistErr = eventsErr
-		}
-		result <- persistErr
-	})
-	if err := a.appStatePersist.waitThrough(persistCtx, frontier); err != nil {
-		return err
-	}
-	// Keep this write's intent durable even though persistErr == nil: pinned
-	// whatsmeow's SendAppState advances the collection cursor and dispatches
-	// the post-send fetched mutations in a goroutine after returning, so a nil
-	// persistErr only proves the explicit local update and already-admitted
-	// tasks completed — not that the SDK's complete post-send batch reached
-	// wacli.db. Deleting the intent here would leave no marker if the process
-	// exits before that goroutine runs, and future incremental deltas would
-	// skip the batch forever. On broken collections the degraded pre-write
-	// path keeps later writes fast despite the kept debt; a verified full
-	// replay or primary recovery snapshot clears it. A contact save settles
-	// its own intent once it mirrored the journal of whatsmeow's contact
-	// store writes for its send (see SaveContact).
-	return <-result
-}
-
 func (a *App) persistFetchedAppStateEvents(ctx context.Context, eventsToPersist []any, tracker *appStatePersistenceTracker) error {
 	tracker.begin()
 	for _, evt := range eventsToPersist {
 		a.persistAppStateEvent(ctx, evt, tracker)
 	}
 	return tracker.end()
-}
-
-func (a *App) latestMessageRange(chatJID string) (time.Time, *waCommon.MessageKey) {
-	info, err := a.db.GetLatestMessageInfo(chatJID)
-	if err != nil {
-		if !errors.Is(err, sql.ErrNoRows) {
-			a.emitWarning(
-				"chat_state_latest_message_failed",
-				fmt.Sprintf("warning: failed to load latest message for chat state patch: %v", err),
-				map[string]any{"chat_jid": chatJID, "error": err.Error()},
-			)
-		}
-		return time.Time{}, nil
-	}
-	return info.Timestamp, messageKeyFromStore(info)
-}
-
-func messageKeyFromStore(info store.MessageInfo) *waCommon.MessageKey {
-	if strings.TrimSpace(info.ChatJID) == "" || strings.TrimSpace(info.MsgID) == "" {
-		return nil
-	}
-	key := &waCommon.MessageKey{
-		RemoteJID: proto.String(info.ChatJID),
-		FromMe:    proto.Bool(info.FromMe),
-		ID:        proto.String(info.MsgID),
-	}
-	if sender := strings.TrimSpace(info.SenderJID); sender != "" && sender != info.ChatJID {
-		key.Participant = proto.String(sender)
-	}
-	return key
 }
 
 func (a *App) handleChatStateEvent(ctx context.Context, evt any) error {
@@ -901,8 +523,7 @@ func (a *App) handleChatStateEvent(ctx context.Context, evt any) error {
 // Contact events only trigger a journal drain: asynchronous event payloads
 // cannot establish the order of SDK contact-store writes.
 func (a *App) handleContactEvent(ctx context.Context, _ *events.Contact) error {
-	_, err := a.drainContactJournal(ctx)
-	return err
+	return a.drainContactJournal(ctx)
 }
 
 func mutedUntilFromAction(action *waSyncAction.MuteAction) int64 {
@@ -917,16 +538,6 @@ func mutedUntilFromAction(action *waSyncAction.MuteAction) int64 {
 		return time.UnixMilli(ms).Unix()
 	}
 	return -1
-}
-
-func mutedUntilUnix(mute bool, duration time.Duration, base time.Time) int64 {
-	if !mute {
-		return 0
-	}
-	if duration <= 0 {
-		return -1
-	}
-	return base.Add(duration).Unix()
 }
 
 func (a *App) emitChatStateWarning(kind string, jid types.JID, err error) {

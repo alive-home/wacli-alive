@@ -14,10 +14,6 @@ func newMessagesCmd(flags *rootFlags) *cobra.Command {
 	cmd.AddCommand(newMessagesShowCmd(flags))
 	cmd.AddCommand(newMessagesContextCmd(flags))
 	cmd.AddCommand(newMessagesExportCmd(flags))
-	cmd.AddCommand(newMessagesDeleteCmd(flags))
 	cmd.AddCommand(newMessagesPurgeCmd(flags))
-	cmd.AddCommand(newMessagesRevokeCmd(flags))
-	cmd.AddCommand(newMessagesEditCmd(flags))
-	cmd.AddCommand(newMessagesForwardCmd(flags))
 	return cmd
 }

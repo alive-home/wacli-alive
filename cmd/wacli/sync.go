@@ -17,7 +17,6 @@ func newSyncCmd(flags *rootFlags) *cobra.Command {
 	var idleExit time.Duration
 	var maxReconnect time.Duration
 	var staleThreshold time.Duration
-	var presenceModeFlag string
 	var downloadMedia bool
 	var refreshContacts bool
 	var refreshGroups bool
@@ -26,7 +25,6 @@ func newSyncCmd(flags *rootFlags) *cobra.Command {
 	var webhookSecret string
 	var webhookAllowPrivate bool
 	var webhookEventsFlag string
-	var sendSpacingFlag string
 	var storage syncStorageLimitFlags
 
 	cmd := &cobra.Command{
@@ -54,16 +52,8 @@ func newSyncCmd(flags *rootFlags) *cobra.Command {
 			if staleThreshold != 0 && staleThreshold < time.Second {
 				return fmt.Errorf("--stale-threshold must be at least 1s, got %s", staleThreshold)
 			}
-			sendSpacing, err := parseSendSpacing(sendSpacingFlag)
-			if err != nil {
-				return err
-			}
 			if maxStaleThreshold := appPkg.MaxStaleThreshold(); staleThreshold >= maxStaleThreshold {
 				return fmt.Errorf("--stale-threshold must be less than %s because whatsmeow auto-reconnects after that much keepalive failure, got %s", maxStaleThreshold, staleThreshold)
-			}
-			presenceMode, err := appPkg.ParseSyncPresenceMode(presenceModeFlag)
-			if err != nil {
-				return err
 			}
 			ctx, stop := signalContextWithEvents(out.NewEventWriter(os.Stderr, flags.events))
 			defer stop()
@@ -87,27 +77,26 @@ func newSyncCmd(flags *rootFlags) *cobra.Command {
 				mode = appPkg.SyncModeOnce
 			}
 
-			var stopSendDelegate func()
+			var stopDelegate func()
 			defer func() {
-				if stopSendDelegate != nil {
-					stopSendDelegate()
+				if stopDelegate != nil {
+					stopDelegate()
 				}
 			}()
 			var afterConnect func(context.Context) error
 			if mode == appPkg.SyncModeFollow {
 				afterConnect = func(ctx context.Context) error {
-					stop, err := startSendDelegateServer(ctx, a, sendSpacing)
+					stop, err := startDelegateServer(ctx, a)
 					if err != nil {
 						return err
 					}
-					stopSendDelegate = stop
+					stopDelegate = stop
 					return nil
 				}
 			}
 
 			res, err := a.Sync(ctx, appPkg.SyncOptions{
 				Mode:                mode,
-				PresenceMode:        presenceMode,
 				AllowQR:             false,
 				AfterConnect:        afterConnect,
 				DownloadMedia:       downloadMedia,
@@ -145,8 +134,6 @@ func newSyncCmd(flags *rootFlags) *cobra.Command {
 	cmd.Flags().DurationVar(&idleExit, "idle-exit", 30*time.Second, "exit after being idle (once mode)")
 	cmd.Flags().DurationVar(&maxReconnect, "max-reconnect", 5*time.Minute, "give up reconnecting after this duration (0 = unlimited)")
 	cmd.Flags().DurationVar(&staleThreshold, "stale-threshold", 0, "force reconnect when keepalive failures last this long in follow mode (1s-<2m20s, 0 = disabled)")
-	cmd.Flags().StringVar(&presenceModeFlag, "presence-mode", string(appPkg.SyncPresenceModeNormal), "global sync presence behavior: normal or quiet")
-	cmd.Flags().StringVar(&sendSpacingFlag, "send-spacing", "", "pace delegated sends in follow mode by a fixed duration or random min-max range (e.g. 2s or 500ms-5s; default: disabled)")
 	cmd.Flags().BoolVar(&downloadMedia, "download-media", false, "download media in the background during sync")
 	cmd.Flags().BoolVar(&refreshContacts, "refresh-contacts", false, "refresh contacts from session store into local DB")
 	cmd.Flags().BoolVar(&refreshGroups, "refresh-groups", false, "refresh joined groups and participant snapshots (live)")

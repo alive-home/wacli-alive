@@ -18,7 +18,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/openclaw/wacli/internal/linkpreview"
+	"github.com/openclaw/wacli/internal/safehttp"
 	"github.com/openclaw/wacli/internal/wa"
 	"go.mau.fi/whatsmeow/types"
 )
@@ -60,7 +60,7 @@ type syncWebhookChatPresencePayload struct {
 }
 
 func newSyncWebhookSafeHTTPClient() *http.Client {
-	client := linkpreview.NewSafeHTTPClient()
+	client := safehttp.NewClient()
 	client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
 		return http.ErrUseLastResponse
 	}

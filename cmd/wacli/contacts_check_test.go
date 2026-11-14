@@ -126,7 +126,7 @@ func TestExecuteDelegatedContactsCheckReturnsPerQueryResults(t *testing.T) {
 	checker := &fakeRegistrationChecker{
 		resp: []types.IsOnWhatsAppResponse{{Query: "+4366412345678", JID: jid, IsIn: true}},
 	}
-	resp, err := executeDelegatedContactsCheck(context.Background(), checker, sendDelegateRequest{
+	resp, err := executeDelegatedContactsCheck(context.Background(), checker, delegateRequest{
 		Kind:   contactsCheckKind,
 		Phones: []string{"+43 664 12345678", "+15550000001"},
 	})
@@ -146,7 +146,7 @@ func TestExecuteDelegatedContactsCheckReturnsPerQueryResults(t *testing.T) {
 
 func TestExecuteDelegatedContactsCheckRequiresPhones(t *testing.T) {
 	checker := &fakeRegistrationChecker{}
-	_, err := executeDelegatedContactsCheck(context.Background(), checker, sendDelegateRequest{Kind: contactsCheckKind})
+	_, err := executeDelegatedContactsCheck(context.Background(), checker, delegateRequest{Kind: contactsCheckKind})
 	if err == nil || !strings.Contains(err.Error(), "at least one phone") {
 		t.Fatalf("error = %v, want phone validation", err)
 	}
@@ -155,20 +155,9 @@ func TestExecuteDelegatedContactsCheckRequiresPhones(t *testing.T) {
 	}
 }
 
-func TestExplainContactsCheckDelegateErrorNamesRestartForOlderDaemons(t *testing.T) {
-	old := errors.New(`unsupported send kind "contacts_check"`)
-	if err := explainContactsCheckDelegateError(old); err == nil || !strings.Contains(err.Error(), "restart `wacli sync`") || !errors.Is(err, old) {
-		t.Fatalf("error = %v, want restart hint wrapping the original", err)
-	}
-	other := errors.New("usync timeout")
-	if err := explainContactsCheckDelegateError(other); err != other {
-		t.Fatalf("error = %v, want unrelated error unchanged", err)
-	}
-}
-
 func TestContactsCheckDelegatesThroughProductionServerWhenStoreLocked(t *testing.T) {
-	skipPresenceDelegateSocketTestOnUnsupportedOS(t)
-	storeDir := shortPresenceDelegateStoreDir(t)
+	skipDelegateSocketTestOnUnsupportedOS(t)
+	storeDir := shortDelegateStoreDir(t)
 	lk, err := lock.Acquire(storeDir)
 	if err != nil {
 		t.Fatalf("lock store: %v", err)
@@ -179,9 +168,9 @@ func TestContactsCheckDelegatesThroughProductionServerWhenStoreLocked(t *testing
 	checker := &fakeRegistrationChecker{
 		resp: []types.IsOnWhatsAppResponse{{Query: "+4366412345678", JID: jid, IsIn: true}},
 	}
-	stop, err := startSendDelegateServerForStore(context.Background(), storeDir, sendSpacing{}, func(ctx context.Context, req sendDelegateRequest) (sendDelegateResponse, error) {
-		if req.Version != sendDelegateVersion || req.Kind != contactsCheckKind {
-			return sendDelegateResponse{}, fmt.Errorf("unexpected delegated request %d/%q", req.Version, req.Kind)
+	stop, err := startDelegateServerForStore(context.Background(), storeDir, func(ctx context.Context, req delegateRequest) (delegateResponse, error) {
+		if req.Version != delegateVersion || req.Kind != contactsCheckKind {
+			return delegateResponse{}, fmt.Errorf("unexpected delegated request %d/%q", req.Version, req.Kind)
 		}
 		return executeDelegatedContactsCheck(ctx, checker, req)
 	})
@@ -190,7 +179,7 @@ func TestContactsCheckDelegatesThroughProductionServerWhenStoreLocked(t *testing
 	}
 	defer stop()
 
-	stdout, stderr, err := runPresenceDelegateHelper(t, []string{
+	stdout, stderr, err := runDelegateHelper(t, []string{
 		"--store", storeDir, "--json", "--timeout", "750ms",
 		"contacts", "check", "+43 664 12345678",
 	})

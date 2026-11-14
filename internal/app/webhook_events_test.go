@@ -478,7 +478,6 @@ func emitWebhookEvents(t *testing.T, webhookEvents string, emit func(f *fakeWA))
 		func(string, string) {},
 		a.newSyncWebhookEnqueuer(ctx, jobs),
 		nil,
-		&syncPresence{},
 		nil,
 	)
 	t.Cleanup(func() { f.RemoveEventHandler(handlerID) })

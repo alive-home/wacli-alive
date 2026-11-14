@@ -76,40 +76,4 @@ func TestClearChatUnreadThroughCountsOnlyWhatAReadMissed(t *testing.T) {
 	if err := db.ClearChatUnreadThrough(chat, read, nil); err == nil {
 		t.Fatal("closed DB error swallowed")
 	}
-
-}
-
-func TestClearEmptyUnreadPreservesAnArrivalAfterReceiptSelection(t *testing.T) {
-	db := openTestDB(t)
-	chat := "123@s.whatsapp.net"
-	at := time.Unix(1700000000, 0)
-	if err := db.UpsertChat(chat, "dm", "Chat", at); err != nil {
-		t.Fatal(err)
-	}
-	if err := db.SetChatUnread(chat, true); err != nil {
-		t.Fatal(err)
-	}
-	msgs, err := db.ReadReceiptCandidates(chat, 100)
-	if err != nil || len(msgs) != 0 {
-		t.Fatalf("empty selection = %v, %v", msgs, err)
-	}
-	// A message can arrive between the selection snapshot and local completion.
-	if err := db.UpsertMessage(UpsertMessageParams{ChatJID: chat, MsgID: "arrival", Timestamp: at, Text: "new"}); err != nil {
-		t.Fatal(err)
-	}
-	for _, count := range []int{0, 8} {
-		if err := db.SetChatUnreadCount(chat, count); err != nil {
-			t.Fatal(err)
-		}
-		if err := db.SetChatUnread(chat, true); err != nil {
-			t.Fatal(err)
-		}
-		if err := db.ClearChatUnreadMarker(chat); err != nil {
-			t.Fatal(err)
-		}
-		c, err := db.GetChat(chat)
-		if err != nil || !c.Unread || c.UnreadCount != count {
-			t.Fatalf("arrival lost (count %d): %+v, %v", count, c, err)
-		}
-	}
 }

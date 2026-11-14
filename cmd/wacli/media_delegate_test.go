@@ -17,10 +17,10 @@ import (
 // A real Unix endpoint and child CLI verify lock delegation, selector fidelity,
 // caller-side verification and output publication without a WhatsApp account.
 func TestMediaDownloadDelegatesExactRecoveryAndVerifiesOutput(t *testing.T) {
-	skipPresenceDelegateSocketTestOnUnsupportedOS(t)
+	skipDelegateSocketTestOnUnsupportedOS(t)
 	for _, mode := range []string{"valid", "wrong-message", "wrong-file", "unsupported"} {
 		t.Run(mode, func(t *testing.T) {
-			dir := shortPresenceDelegateStoreDir(t)
+			dir := shortDelegateStoreDir(t)
 			data := []byte("exact own-account synthetic recording")
 			hash := sha256.Sum256(data)
 			db, err := store.Open(filepath.Join(dir, "wacli.db"))
@@ -46,24 +46,24 @@ func TestMediaDownloadDelegatesExactRecoveryAndVerifiesOutput(t *testing.T) {
 			if err := os.WriteFile(canonical, data, 0o600); err != nil {
 				t.Fatal(err)
 			}
-			server := startPresenceDelegateTestSocket(t, dir, func(req sendDelegateRequest) sendDelegateResponse {
+			server := startDelegateTestSocket(t, dir, func(req delegateRequest) delegateResponse {
 				if mode == "unsupported" {
-					return sendDelegateResponse{OK: false, Error: "unsupported send kind media_download"}
+					return delegateResponse{OK: false, Error: "unsupported kind media_download"}
 				}
 				id := "exact"
 				if mode == "wrong-message" {
 					id = "another"
 				}
-				return sendDelegateResponse{OK: true, Media: &mediaDownloadResult{Chat: "111@s.whatsapp.net", ID: id, Path: canonical, Bytes: int64(len(data)), Source: "phone", Downloaded: true}}
+				return delegateResponse{OK: true, Media: &mediaDownloadResult{Chat: "111@s.whatsapp.net", ID: id, Path: canonical, Bytes: int64(len(data)), Source: "phone", Downloaded: true}}
 			})
 			defer server.stop()
 			target := filepath.Join(dir, "output.ogg")
 			if err := os.WriteFile(target, []byte("preserve existing output"), 0o600); err != nil {
 				t.Fatal(err)
 			}
-			stdout, stderr, err := runPresenceDelegateHelper(t, []string{"--store", dir, "--json", "--timeout", "1s", "media", "download", "--chat", "111@s.whatsapp.net", "--id", "exact", "--output", target, "--retry-on-phone"})
+			stdout, stderr, err := runDelegateHelper(t, []string{"--store", dir, "--json", "--timeout", "1s", "media", "download", "--chat", "111@s.whatsapp.net", "--id", "exact", "--output", target, "--retry-on-phone"})
 			req := server.nextRequest(t)
-			if req.Kind != mediaDownloadKind || req.To != "111@s.whatsapp.net" || req.ID != "exact" || !req.RetryOnPhone || req.File != "" {
+			if req.Kind != mediaDownloadKind || req.To != "111@s.whatsapp.net" || req.ID != "exact" || !req.RetryOnPhone {
 				t.Fatalf("incorrect delegation: %+v", req)
 			}
 			got, readErr := os.ReadFile(target)
@@ -81,27 +81,27 @@ func TestMediaDownloadDelegatesExactRecoveryAndVerifiesOutput(t *testing.T) {
 	}
 }
 
-// A blocked phone request must neither delay chat sends nor allow another
-// recovery request to dispatch after its deadline while queued.
-func TestMediaDelegateWaitBypassesSendsAndSerializesRecovery(t *testing.T) {
-	skipPresenceDelegateSocketTestOnUnsupportedOS(t)
-	dir := shortPresenceDelegateStoreDir(t)
+// A blocked phone request must neither delay the other requests nor allow
+// another recovery request to dispatch after its deadline while queued.
+func TestMediaDelegateWaitBypassesQueueAndSerializesRecovery(t *testing.T) {
+	skipDelegateSocketTestOnUnsupportedOS(t)
+	dir := shortDelegateStoreDir(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	entered, release := make(chan struct{}), make(chan struct{})
 	var mediaCalls atomic.Int32
-	stop, err := startSendDelegateServerForStore(ctx, dir, sendSpacing{}, func(ctx context.Context, req sendDelegateRequest) (sendDelegateResponse, error) {
+	stop, err := startDelegateServerForStore(ctx, dir, func(ctx context.Context, req delegateRequest) (delegateResponse, error) {
 		if req.Kind == mediaDownloadKind {
 			mediaCalls.Add(1)
 			close(entered)
 			select {
 			case <-release:
 			case <-ctx.Done():
-				return sendDelegateResponse{}, ctx.Err()
+				return delegateResponse{}, ctx.Err()
 			}
-			return sendDelegateResponse{OK: true, Media: &mediaDownloadResult{Source: "phone"}}, nil
+			return delegateResponse{OK: true, Media: &mediaDownloadResult{Source: "phone"}}, nil
 		}
-		return sendDelegateResponse{OK: true, Sent: true}, nil
+		return delegateResponse{OK: true}, nil
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -109,15 +109,15 @@ func TestMediaDelegateWaitBypassesSendsAndSerializesRecovery(t *testing.T) {
 	defer stop()
 	first := make(chan error, 1)
 	go func() {
-		_, err := delegateSend(ctx, &rootFlags{storeDir: dir, timeout: time.Second}, sendDelegateRequest{Kind: mediaDownloadKind, To: "111@s.whatsapp.net", ID: "one"})
+		_, err := askDelegate(ctx, &rootFlags{storeDir: dir, timeout: time.Second}, delegateRequest{Kind: mediaDownloadKind, To: "111@s.whatsapp.net", ID: "one"})
 		first <- err
 	}()
 	<-entered
 	defer close(release)
-	if _, err := delegateSend(ctx, &rootFlags{storeDir: dir, timeout: 200 * time.Millisecond}, sendDelegateRequest{Kind: "text", To: "111@s.whatsapp.net", Message: "synthetic"}); err != nil {
-		t.Fatalf("media blocked send: %v", err)
+	if _, err := askDelegate(ctx, &rootFlags{storeDir: dir, timeout: 200 * time.Millisecond}, delegateRequest{Kind: contactsCheckKind, Phones: []string{"+15550000001"}}); err != nil {
+		t.Fatalf("media blocked a contacts check: %v", err)
 	}
-	if _, err := delegateSend(ctx, &rootFlags{storeDir: dir, timeout: 60 * time.Millisecond}, sendDelegateRequest{Kind: mediaDownloadKind, To: "111@s.whatsapp.net", ID: "two"}); err == nil {
+	if _, err := askDelegate(ctx, &rootFlags{storeDir: dir, timeout: 60 * time.Millisecond}, delegateRequest{Kind: mediaDownloadKind, To: "111@s.whatsapp.net", ID: "two"}); err == nil {
 		t.Fatal("queued media should expire")
 	}
 	if mediaCalls.Load() != 1 {
@@ -131,17 +131,17 @@ func TestMediaDelegateWaitBypassesSendsAndSerializesRecovery(t *testing.T) {
 }
 
 func TestMediaDelegateRetainsEarlierDeadlineAndCancelsAfterDial(t *testing.T) {
-	skipPresenceDelegateSocketTestOnUnsupportedOS(t)
+	skipDelegateSocketTestOnUnsupportedOS(t)
 	for _, explicitCancel := range []bool{false, true} {
 		t.Run(map[bool]string{false: "deadline", true: "cancel"}[explicitCancel], func(t *testing.T) {
-			dir := shortPresenceDelegateStoreDir(t)
-			entered := make(chan sendDelegateRequest, 1)
+			dir := shortDelegateStoreDir(t)
+			entered := make(chan delegateRequest, 1)
 			ended := make(chan struct{})
-			stop, err := startSendDelegateServerForStore(context.Background(), dir, sendSpacing{}, func(requestCtx context.Context, req sendDelegateRequest) (sendDelegateResponse, error) {
+			stop, err := startDelegateServerForStore(context.Background(), dir, func(requestCtx context.Context, req delegateRequest) (delegateResponse, error) {
 				entered <- req
 				<-requestCtx.Done()
 				close(ended)
-				return sendDelegateResponse{}, requestCtx.Err()
+				return delegateResponse{}, requestCtx.Err()
 			})
 			if err != nil {
 				t.Fatal(err)
@@ -154,10 +154,10 @@ func TestMediaDelegateRetainsEarlierDeadlineAndCancelsAfterDial(t *testing.T) {
 			result := make(chan error, 1)
 			start := time.Now()
 			go func() {
-				_, err := delegateSend(ctx, &rootFlags{storeDir: dir, timeout: 5 * time.Second}, sendDelegateRequest{Kind: mediaDownloadKind, To: "111@s.whatsapp.net", ID: "exact"})
+				_, err := askDelegate(ctx, &rootFlags{storeDir: dir, timeout: 5 * time.Second}, delegateRequest{Kind: mediaDownloadKind, To: "111@s.whatsapp.net", ID: "exact"})
 				result <- err
 			}()
-			var req sendDelegateRequest
+			var req delegateRequest
 			select {
 			case req = <-entered:
 			case err := <-result:

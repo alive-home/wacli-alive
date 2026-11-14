@@ -75,7 +75,7 @@ func TestLibsignalOutput(t *testing.T) {
 			if err := cmd.Run(); err != nil {
 				t.Fatalf("helper: %v; stdout=%q stderr=%q", err, stdout.String(), stderr.String())
 			}
-			wantStdout := effectiveVersion() + "\n"
+			wantStdout := sourceVersion + "\n"
 			if mode == "startup" {
 				wantStdout = "{\"success\":true,\"data\":{\"synthetic\":true},\"error\":null}\n"
 			} else if mode == "reset" {

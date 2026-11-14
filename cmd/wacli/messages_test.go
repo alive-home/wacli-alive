@@ -14,7 +14,6 @@ import (
 
 	"github.com/openclaw/wacli/internal/app"
 	"github.com/openclaw/wacli/internal/store"
-	"github.com/spf13/cobra"
 	"go.mau.fi/whatsmeow/types"
 )
 
@@ -277,193 +276,6 @@ func TestMessagesExportCommandExposesDateFilters(t *testing.T) {
 	}
 }
 
-func TestMessagesMutationCommandsExposeSafetyFlags(t *testing.T) {
-	for _, cmd := range []*cobra.Command{
-		newMessagesDeleteCmd(&rootFlags{}),
-		newMessagesRevokeCmd(&rootFlags{}),
-		newMessagesEditCmd(&rootFlags{}),
-		newMessagesForwardCmd(&rootFlags{}),
-	} {
-		for _, name := range []string{"chat", "id", "post-send-wait"} {
-			if cmd.Flags().Lookup(name) == nil {
-				t.Fatalf("%s missing --%s", cmd.Name(), name)
-			}
-		}
-	}
-	if newMessagesEditCmd(&rootFlags{}).Flags().Lookup("message") == nil {
-		t.Fatalf("edit missing --message")
-	}
-	if newMessagesForwardCmd(&rootFlags{}).Flags().Lookup("to") == nil {
-		t.Fatalf("forward missing --to")
-	}
-	if newMessagesForwardCmd(&rootFlags{}).Flags().Lookup("pick") == nil {
-		t.Fatalf("forward missing --pick")
-	}
-}
-
-func TestMessagesDeleteRejectsReadOnlyBeforeOpeningStore(t *testing.T) {
-	cmd := newMessagesDeleteCmd(&rootFlags{readOnly: true})
-	cmd.SetArgs([]string{"--chat", "+15551234567", "--id", "mid"})
-	err := cmd.Execute()
-	if err == nil || !strings.Contains(err.Error(), "read-only mode") {
-		t.Fatalf("error = %v, want read-only", err)
-	}
-}
-
-func TestMessagesEditValidation(t *testing.T) {
-	now := time.Date(2024, 1, 1, 12, 30, 0, 0, time.UTC)
-	msg := store.Message{
-		MsgID:     "mid",
-		Timestamp: now.Add(-time.Minute),
-		FromMe:    true,
-		Text:      "old",
-	}
-	if err := validateMessageCanEdit(msg, now); err != nil {
-		t.Fatalf("validateMessageCanEdit: %v", err)
-	}
-
-	msg.FromMe = false
-	if err := validateMessageCanEdit(msg, now); err == nil || !strings.Contains(err.Error(), "not sent by me") {
-		t.Fatalf("from-them error = %v", err)
-	}
-
-	msg.FromMe = true
-	msg.DeletedForMe = true
-	msg.Timestamp = now.Add(-time.Minute)
-	if err := validateMessageCanEdit(msg, now); err == nil || !strings.Contains(err.Error(), "deleted for me") {
-		t.Fatalf("deleted-for-me error = %v", err)
-	}
-
-	msg.DeletedForMe = false
-	msg.Timestamp = now.Add(-21 * time.Minute)
-	if err := validateMessageCanEdit(msg, now); err == nil || !strings.Contains(err.Error(), "edit window") {
-		t.Fatalf("old message error = %v", err)
-	}
-}
-
-func TestMessagesDeleteForMeValidation(t *testing.T) {
-	msg := store.Message{MsgID: "mid", FromMe: false}
-	if err := validateMessageCanDeleteForMe(msg); err != nil {
-		t.Fatalf("validateMessageCanDeleteForMe: %v", err)
-	}
-	if err := validateMessageCanRevoke(msg); err == nil || !strings.Contains(err.Error(), "not sent by me") {
-		t.Fatalf("revoke from-them error = %v", err)
-	}
-
-	msg.DeletedForMe = true
-	if err := validateMessageCanDeleteForMe(msg); err == nil || !strings.Contains(err.Error(), "deleted for me") {
-		t.Fatalf("deleted-for-me error = %v", err)
-	}
-}
-
-func TestMessagesForwardValidation(t *testing.T) {
-	msg := store.Message{MsgID: "mid", Text: "hello"}
-	if err := validateMessageCanForward(msg); err != nil {
-		t.Fatalf("validateMessageCanForward: %v", err)
-	}
-
-	msg.Revoked = true
-	if err := validateMessageCanForward(msg); err == nil || !strings.Contains(err.Error(), "deleted") {
-		t.Fatalf("revoked error = %v", err)
-	}
-
-	msg.Revoked = false
-	msg.DeletedForMe = true
-	if err := validateMessageCanForward(msg); err == nil || !strings.Contains(err.Error(), "deleted for me") {
-		t.Fatalf("deleted-for-me error = %v", err)
-	}
-
-	msg.DeletedForMe = false
-	msg.MediaType = "image"
-	if err := validateMessageCanForward(msg); err != nil {
-		t.Fatalf("media validation error = %v", err)
-	}
-
-	msg.MediaType = ""
-	msg.ReactionToID = "target"
-	if err := validateMessageCanForward(msg); err == nil || !strings.Contains(err.Error(), "reaction") {
-		t.Fatalf("reaction error = %v", err)
-	}
-
-	msg.ReactionToID = ""
-	msg.Text = ""
-	if err := validateMessageCanForward(msg); err == nil || !strings.Contains(err.Error(), "text messages") {
-		t.Fatalf("empty text error = %v", err)
-	}
-}
-
-func TestBuildForwardedMediaMessageMarksContext(t *testing.T) {
-	media := store.MediaDownloadInfo{
-		MediaType:     "document",
-		Filename:      "report.pdf",
-		MimeType:      "application/pdf",
-		DirectPath:    "/v/t62/report",
-		MediaKey:      []byte{1, 2, 3},
-		FileSHA256:    []byte{4, 5, 6},
-		FileEncSHA256: []byte{7, 8, 9},
-		FileLength:    1234,
-	}
-	payload, err := buildForwardedMessage(store.Message{
-		MsgID:           "mid",
-		MediaType:       "document",
-		MediaCaption:    "the report",
-		ForwardingScore: 2,
-	}, &media)
-	if err != nil {
-		t.Fatalf("buildForwardedMessage: %v", err)
-	}
-	doc := payload.Message.GetDocumentMessage()
-	if doc.GetFileName() != "report.pdf" {
-		t.Fatalf("FileName = %q", doc.GetFileName())
-	}
-	if doc.GetCaption() != "the report" {
-		t.Fatalf("Caption = %q", doc.GetCaption())
-	}
-	ctx := doc.GetContextInfo()
-	if !ctx.GetIsForwarded() || ctx.GetForwardingScore() != 3 {
-		t.Fatalf("unexpected forwarded context: forwarded=%v score=%d", ctx.GetIsForwarded(), ctx.GetForwardingScore())
-	}
-	if payload.MediaType != "document" || payload.FileLength != 1234 || string(payload.MediaKey) != string(media.MediaKey) {
-		t.Fatalf("unexpected payload metadata: %+v", payload)
-	}
-}
-
-func TestBuildForwardedMediaMessageRequiresCompleteMetadata(t *testing.T) {
-	_, err := buildForwardedMessage(store.Message{MsgID: "mid", MediaType: "image"}, &store.MediaDownloadInfo{MediaType: "image"})
-	if err == nil || !strings.Contains(err.Error(), "incomplete media metadata") {
-		t.Fatalf("error = %v, want incomplete media metadata", err)
-	}
-}
-
-func TestBuildForwardedTextMessageMarksContext(t *testing.T) {
-	msg := buildForwardedTextMessage("hello", 4)
-	ext := msg.GetExtendedTextMessage()
-	if ext.GetText() != "hello" {
-		t.Fatalf("text = %q", ext.GetText())
-	}
-	ctx := ext.GetContextInfo()
-	if !ctx.GetIsForwarded() {
-		t.Fatal("IsForwarded = false")
-	}
-	if ctx.GetForwardingScore() != 4 {
-		t.Fatalf("ForwardingScore = %d, want 4", ctx.GetForwardingScore())
-	}
-}
-
-func TestBuildForwardedTextMessagePreservesWhitespace(t *testing.T) {
-	payload, err := buildForwardedMessage(store.Message{MsgID: "mid", Text: "  code\n"}, nil)
-	if err != nil {
-		t.Fatalf("buildForwardedMessage: %v", err)
-	}
-	if payload.Text != "  code\n" {
-		t.Fatalf("payload text = %q", payload.Text)
-	}
-	ext := payload.Message.GetExtendedTextMessage()
-	if ext.GetText() != "  code\n" {
-		t.Fatalf("message text = %q", ext.GetText())
-	}
-}
-
 func TestMessagesExportCommandAppliesDateFilters(t *testing.T) {
 	storeDir := t.TempDir()
 	db, err := store.Open(filepath.Join(storeDir, "wacli.db"))
@@ -553,28 +365,19 @@ func TestWriteMessageShowIncludesForwardedMetadata(t *testing.T) {
 	}
 }
 
-func TestDeleteLocalMediaPathsIfRequestedReportsActualRemoval(t *testing.T) {
+func TestRemoveLocalMediaToleratesMissingFiles(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "media.bin")
 	if err := os.WriteFile(path, []byte("media"), 0o600); err != nil {
 		t.Fatalf("WriteFile: %v", err)
 	}
-	deleted, err := deleteLocalMediaPathsIfRequested(true, []string{path})
-	if err != nil {
-		t.Fatalf("deleteLocalMediaPathsIfRequested: %v", err)
+	if err := removeLocalMedia([]string{"", path}); err != nil {
+		t.Fatalf("removeLocalMedia: %v", err)
 	}
-	if deleted != 1 {
-		t.Fatalf("deleted = %d, want 1", deleted)
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("media file still there: %v", err)
 	}
-	deleted, err = deleteLocalMediaPathsIfRequested(true, []string{path})
-	if err != nil {
-		t.Fatalf("delete stale media path: %v", err)
-	}
-	if deleted != 0 {
-		t.Fatalf("deleted stale path = %d, want 0", deleted)
-	}
-	deleted, err = deleteLocalMediaPathsIfRequested(false, []string{path})
-	if err != nil || deleted != 0 {
-		t.Fatalf("delete disabled = %d, %v; want 0, nil", deleted, err)
+	if err := removeLocalMedia([]string{path}); err != nil {
+		t.Fatalf("removeLocalMedia on a file already gone: %v", err)
 	}
 }
 

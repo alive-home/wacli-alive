@@ -20,8 +20,6 @@ func newChannelsCmd(flags *rootFlags) *cobra.Command {
 	}
 	cmd.AddCommand(newChannelsListCmd(flags))
 	cmd.AddCommand(newChannelsInfoCmd(flags))
-	cmd.AddCommand(newChannelsJoinCmd(flags))
-	cmd.AddCommand(newChannelsLeaveCmd(flags))
 	return cmd
 }
 
@@ -140,107 +138,6 @@ func newChannelsInfoCmd(flags *rootFlags) *cobra.Command {
 			if row.Role != "" {
 				fmt.Fprintf(os.Stdout, "Role: %s\nMute: %s\n", sanitize(row.Role), sanitize(row.Mute))
 			}
-			return nil
-		},
-	}
-	cmd.Flags().StringVar(&jidStr, "jid", "", "channel JID (...@newsletter)")
-	return cmd
-}
-
-func newChannelsJoinCmd(flags *rootFlags) *cobra.Command {
-	var invite string
-	cmd := &cobra.Command{
-		Use:   "join",
-		Short: "Join a channel via invite link or code",
-		RunE: func(cmd *cobra.Command, args []string) error {
-			if strings.TrimSpace(invite) == "" {
-				return fmt.Errorf("--invite is required")
-			}
-			if err := flags.requireWritable(); err != nil {
-				return err
-			}
-			ctx, cancel := withTimeout(context.Background(), flags)
-			defer cancel()
-
-			a, lk, err := newApp(ctx, flags, true, false)
-			if err != nil {
-				return err
-			}
-			defer closeApp(a, lk)
-
-			if err := a.EnsureAuthed(ctx); err != nil {
-				return err
-			}
-			if err := a.Connect(ctx, false, nil); err != nil {
-				return err
-			}
-
-			meta, err := a.WA().GetNewsletterInfoWithInvite(ctx, strings.TrimSpace(invite))
-			if err != nil {
-				return err
-			}
-			if meta == nil {
-				return fmt.Errorf("could not resolve channel from invite")
-			}
-			if err := a.WA().FollowNewsletter(ctx, meta.ID); err != nil {
-				return err
-			}
-			row := channelRecordFromMeta(meta)
-			if err := persistChannelRecords(a.DB(), []channelRecord{row}); err != nil {
-				return err
-			}
-
-			if flags.asJSON {
-				return out.WriteJSON(os.Stdout, map[string]any{"joined": true, "channel": row})
-			}
-			fmt.Fprintf(os.Stdout, "Joined channel %s (%s).\n", sanitize(row.Name), sanitize(row.JID))
-			return nil
-		},
-	}
-	cmd.Flags().StringVar(&invite, "invite", "", "invite link or code, e.g. https://whatsapp.com/channel/...")
-	return cmd
-}
-
-func newChannelsLeaveCmd(flags *rootFlags) *cobra.Command {
-	var jidStr string
-	cmd := &cobra.Command{
-		Use:   "leave",
-		Short: "Leave (unfollow) a channel",
-		RunE: func(cmd *cobra.Command, args []string) error {
-			if strings.TrimSpace(jidStr) == "" {
-				return fmt.Errorf("--jid is required")
-			}
-			if err := flags.requireWritable(); err != nil {
-				return err
-			}
-			ctx, cancel := withTimeout(context.Background(), flags)
-			defer cancel()
-
-			a, lk, err := newApp(ctx, flags, true, false)
-			if err != nil {
-				return err
-			}
-			defer closeApp(a, lk)
-
-			if err := a.EnsureAuthed(ctx); err != nil {
-				return err
-			}
-			if err := a.Connect(ctx, false, nil); err != nil {
-				return err
-			}
-
-			jid, err := parseChannelJID(jidStr)
-			if err != nil {
-				return err
-			}
-			if err := a.WA().UnfollowNewsletter(ctx, jid); err != nil {
-				return err
-			}
-
-			if flags.asJSON {
-				return out.WriteJSON(os.Stdout, map[string]any{"left": true, "jid": jid.String()})
-			}
-			fmt.Fprintf(os.Stdout, "Left channel %s.\n", jid.String())
 			return nil
 		},
 	}

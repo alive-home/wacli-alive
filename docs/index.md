@@ -8,7 +8,7 @@ description: "This read-only build of wacli pairs as a linked WhatsApp Web devic
 
 A script-friendly WhatsApp CLI built on [`whatsmeow`](https://github.com/tulir/whatsmeow). One binary pairs as a linked WhatsApp Web device, syncs messages and status broadcasts into a local SQLite store, and exposes search, media, contact, and group commands with predictable output for terminals, shell pipelines, and coding agents.
 
-This is a read-only build. It cannot send messages or change anything on WhatsApp: those commands are not in the binary, and every call to WhatsApp passes a guard that refuses anything that sends or changes state.
+This is a read-only build. It cannot send messages or change anything on WhatsApp: those commands are not in the binary, and neither is wacli's code underneath them that sends or changes state. The WhatsApp library it builds on still has its send functions; nothing here calls them, and a test fails when something does.
 
 ## Why wacli
 

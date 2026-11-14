@@ -86,44 +86,6 @@ func (j *ContactStoreJournal) NoteCursorWrite(name string) {
 	j.lastCursor[name] = j.seq
 }
 
-// JournalMark is a point in the journal: its sequence number and how many
-// times the collection's cursor had been written by then.
-type JournalMark struct {
-	Seq          uint64
-	CursorWrites uint64
-}
-
-// Mark returns the current point in the journal for the named collection.
-func (j *ContactStoreJournal) Mark(name string) JournalMark {
-	j.mu.Lock()
-	defer j.mu.Unlock()
-	return JournalMark{Seq: j.seq, CursorWrites: j.cursorWrites[name]}
-}
-
-// Coverage tells whether every patch of the named collection that whatsmeow
-// consumed since start is known to have been applied: none was (the cursor
-// was not written), or exactly one was and a name was written for own after
-// that cursor write. whatsmeow writes a batch's names together, after it
-// stored the versions of all its patches, so a name written after the only
-// cursor write since start proves that patch's batch was applied. Anything
-// else (a conflict retry, a concurrent edit, a batch that failed half-way)
-// is not known to be covered. It also reports whether a name was written for
-// own since start, and the point at which it decided.
-func (j *ContactStoreJournal) Coverage(name string, own types.JID, start JournalMark) (covered, ownWritten bool, end JournalMark) {
-	j.mu.Lock()
-	defer j.mu.Unlock()
-	end = JournalMark{Seq: j.seq, CursorWrites: j.cursorWrites[name]}
-	last := j.last[own.ToNonAD()]
-	ownWritten = last > start.Seq
-	switch end.CursorWrites - start.CursorWrites {
-	case 0:
-		covered = true
-	case 1:
-		covered = last > j.lastCursor[name]
-	}
-	return covered, ownWritten, end
-}
-
 // AppStateStore wraps the device's app-state store so the journal records
 // every cursor write (NoteCursorWrite) in order with the contact writes.
 // Everything else passes through.

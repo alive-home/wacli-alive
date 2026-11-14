@@ -33,7 +33,6 @@ func TestSyncWritesHeartbeatFileOnActivity(t *testing.T) {
 		func(string, string) {},
 		nil,
 		nil,
-		&syncPresence{},
 		nil,
 	)
 	defer f.RemoveEventHandler(handlerID)
@@ -72,7 +71,6 @@ func TestSyncOnceDoesNotWriteHeartbeatFile(t *testing.T) {
 		func(string, string) {},
 		nil,
 		nil,
-		&syncPresence{},
 		nil,
 	)
 	defer f.RemoveEventHandler(handlerID)
@@ -103,7 +101,6 @@ func TestSyncFollowDoesNotWriteHeartbeatOnKeepAliveTimeout(t *testing.T) {
 		func(string, string) {},
 		nil,
 		nil,
-		&syncPresence{},
 		nil,
 	)
 	defer f.RemoveEventHandler(handlerID)
@@ -207,7 +204,6 @@ func TestSyncFollowDoesNotReconnectOnFreshKeepAliveTimeout(t *testing.T) {
 		func(string, string) {},
 		nil,
 		nil,
-		&syncPresence{},
 		nil,
 	)
 	defer f.RemoveEventHandler(handlerID)
@@ -261,7 +257,6 @@ func TestSyncFollowEmitsStaleEvent(t *testing.T) {
 		func(string, string) {},
 		nil,
 		nil,
-		&syncPresence{},
 		nil,
 	)
 	defer f.RemoveEventHandler(handlerID)
@@ -270,7 +265,7 @@ func TestSyncFollowEmitsStaleEvent(t *testing.T) {
 	defer cancel()
 	done := make(chan error, 1)
 	go func() {
-		_, err := a.runSyncFollow(ctx, time.Second, SyncPresenceModeNormal, &messagesStored, &connectionEpoch, disconnected, loggedOut, staleReconnect)
+		_, err := a.runSyncFollow(ctx, time.Second, &messagesStored, &connectionEpoch, disconnected, loggedOut, staleReconnect)
 		done <- err
 	}()
 

@@ -12,10 +12,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/openclaw/wacli/internal/wa"
 	"go.mau.fi/whatsmeow/appstate"
 	"go.mau.fi/whatsmeow/proto/waServerSync"
-	waStore "go.mau.fi/whatsmeow/store"
 	"go.mau.fi/whatsmeow/types"
 	"google.golang.org/protobuf/proto"
 )
@@ -54,14 +52,8 @@ func installContactReplay(t *testing.T, a *App, f *fakeWA) (*sdkContactReplayWA,
 	f.hasLocalAppState = true
 	f.appStateRecoveryErr = errors.New("unexpected phone recovery: server replay should suffice")
 	other := types.NewJID("15550002222", types.DefaultUserServer)
-	info, err := wa.BuildSaveContact(testContactPN, testContactLID, "Grace Hopper", "Grace", false)
-	if err != nil {
-		t.Fatal(err)
-	}
-	clear, err := wa.BuildSaveContact(other, testContactLID, "placeholder", "", false)
-	if err != nil {
-		t.Fatal(err)
-	}
+	info := contactPatchInfo(testContactPN, "Grace Hopper", "Grace")
+	clear := contactPatchInfo(other, "placeholder", "placeholder")
 	clear.Mutations[0].Value.ContactAction.FullName = nil
 	clear.Mutations[0].Value.ContactAction.FirstName = nil
 	info.Mutations = append(info.Mutations, clear.Mutations...)
@@ -94,15 +86,15 @@ func installContactReplay(t *testing.T, a *App, f *fakeWA) (*sdkContactReplayWA,
 }
 
 func TestContactFullReplayMirrorsSnapshotAndSettlesOlderDebt(t *testing.T) {
-	for _, path := range []string{"pre-write", "startup", "live mismatch"} {
+	for _, path := range []string{"startup", "live mismatch"} {
 		t.Run(path, func(t *testing.T) {
-			a, f := newContactSaveTestApp(t)
+			a, f := newContactTestApp(t)
 			w, replay := installContactReplay(t, a, f)
 			other := types.NewJID("15550002222", types.DefaultUserServer)
 			if err := a.db.UpsertContact(other.String(), other.User, "Push", "Old Name", "Old", "Biz"); err != nil {
 				t.Fatal(err)
 			}
-			save, err := a.beginLocalAppStateWrite(contactCollection)
+			older, err := a.db.MarkAppStateRecoveryGeneration(string(contactCollection))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -118,17 +110,13 @@ func TestContactFullReplayMirrorsSnapshotAndSettlesOlderDebt(t *testing.T) {
 				return replay(ctx, full)
 			}
 			switch path {
-			case "pre-write":
-				if err := a.syncChatStateBeforeWrite(t.Context(), contactCollection); err != nil {
-					t.Fatal(err)
-				}
 			case "startup":
 				a.syncAppStateDeltas(t.Context(), &sync.Map{})
 			case "live mismatch":
 				a.recoverAppStateCollection(t.Context(), string(contactCollection), &sync.Map{}, time.Second)
 			}
-			if fullFetches != 1 || contactRecoveryRequired(t, a) || recoveryIntentExists(t, a, string(contactCollection), save.generation) || recoveryIntentExists(t, a, string(contactCollection), live[0].generation) {
-				t.Fatalf("verified full replay must settle older save/live debt: full fetches=%d", fullFetches)
+			if fullFetches != 1 || contactRecoveryRequired(t, a) || recoveryIntentExists(t, a, string(contactCollection), older) || recoveryIntentExists(t, a, string(contactCollection), live[0].generation) {
+				t.Fatalf("verified full replay must settle older debt: full fetches=%d", fullFetches)
 			}
 			if got := storedContact(t, a, testContactPN); got.full != "Grace Hopper" || got.first != "Grace" {
 				t.Fatalf("snapshot contact not mirrored: %+v", got)
@@ -211,9 +199,9 @@ func TestContactPersistenceHardKillReplaysOnNextStart(t *testing.T) {
 }
 
 func TestFlaggedContactRecoveryUsesMainPolicy(t *testing.T) {
-	for _, path := range []string{"pre-write", "startup", "live mismatch", "missing key"} {
+	for _, path := range []string{"startup", "live mismatch"} {
 		t.Run(path, func(t *testing.T) {
-			a, f := newContactSaveTestApp(t)
+			a, f := newContactTestApp(t)
 			f.hasLocalAppState = true
 			if err := a.db.SetAppStateFullSyncBroken(string(contactCollection), true); err != nil {
 				t.Fatal(err)
@@ -222,20 +210,13 @@ func TestFlaggedContactRecoveryUsesMainPolicy(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if path == "missing key" {
-				f.appStateFetchErrs = []error{appstate.ErrKeyNotFound, nil}
-			}
 			switch path {
 			case "startup":
 				a.syncAppStateDeltas(t.Context(), &sync.Map{})
 			case "live mismatch":
 				a.recoverAppStateCollection(t.Context(), string(contactCollection), &sync.Map{}, time.Second)
-			default:
-				if err := a.syncChatStateBeforeWrite(t.Context(), contactCollection); err != nil {
-					t.Fatal(err)
-				}
 			}
-			degraded := path == "pre-write" || path == "startup"
+			degraded := path == "startup"
 			wantFull, wantPhone := 1, 0
 			if degraded {
 				wantFull, wantPhone = 0, 1
@@ -244,74 +225,6 @@ func TestFlaggedContactRecoveryUsesMainPolicy(t *testing.T) {
 				t.Fatalf("flagged %s did not follow main: fetches=%+v recoveries=%v debt=%v", path, f.appStateFetches, recoveredCollections(f), contactRecoveryRequired(t, a))
 			}
 		})
-	}
-}
-
-func TestContactPreWriteMissingKeyReplaysConsumedNames(t *testing.T) {
-	a, f := newContactSaveTestApp(t)
-	f.hasLocalAppState = true
-	f.appStateRecoveryErr = errors.New("unexpected phone snapshot")
-	key, laterKey := []byte{1, 2, 3}, []byte{9, 9, 9}
-	device, sdk, proc := newSDKSession(t, f, key, 10)
-	sdk.EmitAppStateEventsOnFullSync = true
-	initial := appstate.HashState{Version: 10}
-	other := types.NewJID("15550002222", types.DefaultUserServer)
-	first := encodeContactPatch(t, proc, key, initial, 11, testContactPN, "Ada Lovelace", "Ada")
-	_, afterFirst, err := proc.DecodePatches(t.Context(), &appstate.PatchList{Name: contactCollection, Patches: []*waServerSync.SyncdPatch{first}}, initial, true)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := device.AppStateKeys.PutAppStateSyncKey(t.Context(), laterKey, waStore.AppStateSyncKey{Data: bytes.Repeat([]byte{0xcd}, 32), Fingerprint: []byte{2}, Timestamp: 2}); err != nil {
-		t.Fatal(err)
-	}
-	second := encodeContactPatch(t, proc, laterKey, afterFirst, 12, other, "Grace Hopper", "Grace")
-	snapshot := contactSnapshot(first, second)
-	if err := device.AppState.DeleteAppStateVersion(t.Context(), string(contactCollection)); err != nil {
-		t.Fatal(err)
-	}
-	if err := device.AppState.PutAppStateVersion(t.Context(), string(contactCollection), 10, initial.Hash); err != nil {
-		t.Fatal(err)
-	}
-	keys := &withheldKeyStore{AppStateSyncKeyStore: device.AppStateKeys, withheld: laterKey}
-	device.AppStateKeys = keys
-	w := &sdkContactReplayWA{sdkSessionWA: &sdkSessionWA{fakeWA: f, device: device}}
-	a.wa = w
-	calls := 0
-	w.fetch = func(ctx context.Context, full bool) ([]any, error) {
-		calls++
-		var evts []any
-		if calls == 1 {
-			if full {
-				t.Fatal("first fetch must be incremental")
-			}
-			_, err := sdk.DangerousInternals().ApplyAppStatePatches(ctx, contactCollection, initial, &appstate.PatchList{Name: contactCollection, Patches: []*waServerSync.SyncdPatch{first, second}}, false, &evts)
-			stored, storeErr := device.Contacts.GetContact(ctx, testContactPN)
-			if !errors.Is(err, appstate.ErrKeyNotFound) || cursorVersion(t, device) != 11 || storeErr != nil || stored.Found || len(evts) != 0 {
-				t.Fatalf("partial-decode setup failed: err=%v stored=%+v events=%d", err, stored, len(evts))
-			}
-			return nil, err
-		}
-		if !full {
-			return nil, errors.New("incremental retry would silently skip the consumed name")
-		}
-		keys.delivered.Store(true)
-		if err := device.AppState.DeleteAppStateVersion(ctx, string(contactCollection)); err != nil {
-			return nil, err
-		}
-		_, err := sdk.DangerousInternals().ApplyAppStatePatches(ctx, contactCollection, appstate.HashState{}, &appstate.PatchList{Name: contactCollection, Snapshot: snapshot}, true, &evts)
-		return evts, err
-	}
-	if err := a.syncChatStateBeforeWrite(t.Context(), contactCollection); err != nil {
-		t.Fatal(err)
-	}
-	for jid, want := range map[types.JID]string{testContactPN: "Ada Lovelace", other: "Grace Hopper"} {
-		stored, err := device.Contacts.GetContact(t.Context(), jid)
-		if err != nil || stored.FullName != want || storedContact(t, a, jid).full != want {
-			t.Fatalf("full replay did not restore consumed name %s: SDK=%+v err=%v", jid, stored, err)
-		}
-	}
-	if calls != 2 || contactRecoveryRequired(t, a) {
-		t.Fatalf("replay did not settle debt: calls=%d debt=%v", calls, contactRecoveryRequired(t, a))
 	}
 }
 
@@ -327,7 +240,7 @@ func (w expirySensitiveContactResolver) ResolveLIDToPN(ctx context.Context, jid 
 func TestContactFetchCancellationStillMirrorsUnderCanonicalJID(t *testing.T) {
 	for _, emission := range []string{"without event", "with event"} {
 		t.Run(emission, func(t *testing.T) {
-			a, f := newContactSaveTestApp(t)
+			a, f := newContactTestApp(t)
 			a.wa = expirySensitiveContactResolver{f}
 			ctx, cancel := context.WithCancel(t.Context())
 			defer cancel()

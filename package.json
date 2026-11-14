@@ -1,30 +1,23 @@
 {
   "name": "wacli",
   "private": true,
-  "packageManager": "pnpm@12.16.1+sha512.091d1dee7927575661b25dab3c2ae31cafc1c54d6b71ed6a6600cf0c1cb10434a447eae14015f1b23e2e6bedeed79df94a932e2164d2832280dce3fb32f656d1",
   "scripts": {
-    "wacli": "bash -lc 'pnpm --silent build >/dev/null && exec ./dist/wacli \"$@\"' _",
+    "wacli": "bash -c 'bun run --silent build >/dev/null && exec ./dist/wacli \"$@\"' _",
     "build": "mkdir -p dist && CGO_ENABLED=1 CGO_CFLAGS=\"${CGO_CFLAGS:+$CGO_CFLAGS }-Wno-error=missing-braces\" go build -tags sqlite_fts5 -o dist/wacli ./cmd/wacli",
-    "start": "pnpm --silent build && ./dist/wacli",
-    "test": "pnpm --silent test:go && pnpm --silent test:fts && pnpm --silent test:windows-lock && pnpm --silent test:cgo-required && pnpm --silent test:docs",
+    "start": "bun run --silent build && ./dist/wacli",
+    "check": "bun run --silent format:check && bun run --silent lint && bun run --silent lint:deadcode && bun run --silent test && bun run --silent build && bun run --silent docs:site && git diff --check",
+    "test": "bun run --silent test:go && bun run --silent test:fts && bun run --silent test:windows-lock && bun run --silent test:cgo-required && bun run --silent test:docs",
     "test:go": "go test ./...",
     "test:fts": "go test -tags sqlite_fts5 ./...",
     "test:windows-lock": "bash scripts/check-windows-lock.sh",
     "test:cgo-required": "bash -c 'set +e; out=$(CGO_ENABLED=0 go build ./cmd/wacli 2>&1); status=$?; set -e; echo \"$out\" | grep -q wacli_requires_cgo_enabled_1_for_go_sqlite3; test $status -ne 0'",
-    "test:docs": "node --test scripts/*.test.mjs",
+    "test:docs": "bun test scripts/",
     "test:e2e": "bash scripts/e2e-store-sqlc.sh",
     "lint": "go vet ./...",
     "lint:deadcode": "bash scripts/check-deadcode.sh",
-    "govulncheck:source": "node scripts/govulncheck-stdlib.mjs source",
-    "govulncheck:binary": "node scripts/govulncheck-stdlib.mjs binary dist/wacli",
     "format": "gofmt -w .",
-    "format:check": "bash -lc 'out=$(gofmt -l .); if [ -n \"$out\" ]; then echo \"$out\"; exit 1; fi'",
+    "format:check": "bash -c 'out=$(gofmt -l .); if [ -n \"$out\" ]; then echo \"$out\"; exit 1; fi'",
     "generate:sqlc": "go tool github.com/sqlc-dev/sqlc/cmd/sqlc generate",
-    "docs:site": "node scripts/build-docs-site.mjs",
-    "check:changed": "pnpm run test",
-    "test:changed": "pnpm run test"
-  },
-  "engines": {
-    "node": ">=24"
+    "docs:site": "bun scripts/build-docs-site.mjs"
   }
 }

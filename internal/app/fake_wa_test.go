@@ -13,10 +13,8 @@ import (
 
 	"github.com/openclaw/wacli/internal/fsutil"
 	"github.com/openclaw/wacli/internal/wa"
-	"go.mau.fi/whatsmeow"
 	"go.mau.fi/whatsmeow/appstate"
 	waProto "go.mau.fi/whatsmeow/binary/proto"
-	"go.mau.fi/whatsmeow/proto/waCommon"
 	"go.mau.fi/whatsmeow/proto/waE2E"
 	"go.mau.fi/whatsmeow/proto/waHistorySync"
 	"go.mau.fi/whatsmeow/proto/waWeb"
@@ -67,8 +65,6 @@ type fakeWA struct {
 	getSubscribedNewslettersErr error
 	decryptedReaction           *waProto.ReactionMessage
 	decryptReactionErr          error
-	sendPollCalls               []fakeSendPollCall
-	sendPollVoteCalls           []fakeSendPollVoteCall
 	decryptPollVoteFunc         func(evt *events.Message) (*waE2E.PollVoteMessage, error)
 	decryptSecretFunc           func(evt *events.Message) (*waE2E.Message, error)
 	onDemandHistory             func(lastKnown types.MessageInfo, count int) *events.HistorySync
@@ -77,92 +73,14 @@ type fakeWA struct {
 	downloadHistory             func(notif *waE2E.HistorySyncNotification) (*waHistorySync.HistorySync, error)
 	deleteHistoryCalls          []*waE2E.HistorySyncNotification
 	appStateRecoveryErr         error
-	saveContactCalls            []fakeSaveContactCall
-	saveContactErr              error
-	saveContactAfterSend        func(call fakeSaveContactCall)
-	// saveContactErrAfterSend fails the send after saveContactAfterSend ran,
-	// like a 409 retry or a post-send fetch that fails after whatsmeow
-	// already applied (and journaled) a batch.
-	saveContactErrAfterSend error
-	onAppStateRecovery      func(name string)
-	appStateFetchErr        error
-	appStateFetchErrs       []error
-	appStateFetchEvent      func(name string, fullSync, onlyIfNotSynced bool) any
-	archiveEvent            func() any
-	archiveErr              error
-	archiveCalls            []fakeArchiveCall
-	pinCalls                []fakePinCall
-	muteCalls               []fakeMuteCall
-	markReadCalls           []fakeMarkReadCall
-	markReadBeforeApply     func()
-	markReadAfterApply      func()
-	readReceiptCalls        []fakeReadReceiptCall
-	onReadReceipt           func(int) (types.ReceiptType, error)
-	readReceiptErr          error
-	readReceiptType         types.ReceiptType
-	manualHistorySyncCalls  []bool
-	appStateRecoveries      []string
-	appStateFetches         []fakeAppStateFetch
-	hasLocalAppState        bool
-
-	presenceCalls   []types.Presence
-	sendPresenceErr error
-
-	presenceSubscriptions []types.JID
-	subscribePresenceErr  error
-	// presenceSubscribeAttempts records every call, failed ones included;
-	// slowSubscribePresence, when set, runs first and can stall or fail one.
-	presenceSubscribeAttempts []types.JID
-	slowSubscribePresence     func(context.Context, types.JID) error
-	// onSubscribePresence, when set, returns an event emitted as WhatsApp's
-	// answer before SubscribePresence returns (nil emits nothing).
-	onSubscribePresence func(types.JID) any
-}
-
-type fakeArchiveCall struct {
-	target     types.JID
-	archive    bool
-	lastMsgTS  time.Time
-	lastMsgKey *waCommon.MessageKey
-}
-
-type fakePinCall struct {
-	target types.JID
-	pin    bool
-}
-
-type fakeMuteCall struct {
-	target   types.JID
-	mute     bool
-	duration time.Duration
-}
-
-type fakeMarkReadCall struct {
-	target     types.JID
-	read       bool
-	lastMsgTS  time.Time
-	lastMsgKey *waCommon.MessageKey
-}
-
-type fakeReadReceiptCall struct {
-	ids        []types.MessageID
-	timestamp  time.Time
-	chat       types.JID
-	sender     types.JID
-	addressing types.AddressingMode
-}
-
-type fakeSendPollCall struct {
-	to         types.JID
-	name       string
-	options    []string
-	selectable int
-	ephemeral  bool
-}
-
-type fakeSendPollVoteCall struct {
-	pollInfo types.MessageInfo
-	options  []string
+	onAppStateRecovery          func(name string)
+	appStateFetchErr            error
+	appStateFetchErrs           []error
+	appStateFetchEvent          func(name string, fullSync, onlyIfNotSynced bool) any
+	manualHistorySyncCalls      []bool
+	appStateRecoveries          []string
+	appStateFetches             []fakeAppStateFetch
+	hasLocalAppState            bool
 }
 
 type fakeAppStateFetch struct {
@@ -318,9 +236,6 @@ func (f *fakeWA) Connect(ctx context.Context, opts wa.ConnectOptions) error {
 			return ctx.Err()
 		}
 	}
-	if authed && !opts.SuppressInitialAvailablePresence {
-		_ = f.SendPresence(ctx, types.PresenceAvailable)
-	}
 	f.emit(&events.Connected{})
 	for _, e := range eventsToEmit {
 		f.emit(e)
@@ -453,128 +368,13 @@ func (f *fakeWA) GetGroupInfo(ctx context.Context, jid types.JID) (*types.GroupI
 	return f.groups[jid], nil
 }
 
-func (f *fakeWA) CreateGroup(ctx context.Context, req wa.CreateGroupRequest) (*types.GroupInfo, error) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	jid := types.NewJID(fmt.Sprintf("group-%d", len(f.groups)+1), types.GroupServer)
-	g := &types.GroupInfo{
-		JID:           jid,
-		GroupName:     types.GroupName{Name: req.Name},
-		GroupAnnounce: types.GroupAnnounce{IsAnnounce: req.IsAnnounce},
-		GroupLocked:   types.GroupLocked{IsLocked: req.IsLocked},
-		GroupMembershipApprovalMode: types.GroupMembershipApprovalMode{
-			IsJoinApprovalRequired: req.IsJoinApprovalRequired,
-		},
-		GroupParent:       types.GroupParent{IsParent: req.IsParent},
-		GroupLinkedParent: types.GroupLinkedParent{LinkedParentJID: req.LinkedParentJID},
-	}
-	for _, p := range req.Participants {
-		g.Participants = append(g.Participants, types.GroupParticipant{JID: p})
-	}
-	f.groups[jid] = g
-	return g, nil
-}
-
-func (f *fakeWA) SetGroupName(ctx context.Context, jid types.JID, name string) error {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	g := f.groups[jid]
-	if g == nil {
-		g = &types.GroupInfo{JID: jid}
-		f.groups[jid] = g
-	}
-	g.GroupName.Name = name
-	return nil
-}
-
-func (f *fakeWA) SetGroupTopic(ctx context.Context, jid types.JID, topic string) error {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	g := f.groups[jid]
-	if g == nil {
-		g = &types.GroupInfo{JID: jid}
-		f.groups[jid] = g
-	}
-	g.GroupTopic.Topic = topic
-	return nil
-}
-
-func (f *fakeWA) SetGroupAnnounce(ctx context.Context, jid types.JID, announce bool) error {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	g := f.groups[jid]
-	if g == nil {
-		g = &types.GroupInfo{JID: jid}
-		f.groups[jid] = g
-	}
-	g.GroupAnnounce.IsAnnounce = announce
-	return nil
-}
-
-func (f *fakeWA) SetGroupLocked(ctx context.Context, jid types.JID, locked bool) error {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	g := f.groups[jid]
-	if g == nil {
-		g = &types.GroupInfo{JID: jid}
-		f.groups[jid] = g
-	}
-	g.GroupLocked.IsLocked = locked
-	return nil
-}
-
-func (f *fakeWA) UpdateGroupParticipants(ctx context.Context, group types.JID, users []types.JID, action wa.GroupParticipantAction) ([]types.GroupParticipant, error) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	g := f.groups[group]
-	if g == nil {
-		g = &types.GroupInfo{JID: group}
-		f.groups[group] = g
-	}
-	switch action {
-	case wa.GroupParticipantAdd:
-		for _, u := range users {
-			g.Participants = append(g.Participants, types.GroupParticipant{JID: u})
-		}
-	case wa.GroupParticipantRemove:
-		var kept []types.GroupParticipant
-		rm := map[types.JID]bool{}
-		for _, u := range users {
-			rm[u] = true
-		}
-		for _, p := range g.Participants {
-			if !rm[p.JID] {
-				kept = append(kept, p)
-			}
-		}
-		g.Participants = kept
-	default:
-		// promote/demote ignored for tests
-	}
-	return g.Participants, nil
-}
-
 func (f *fakeWA) GetGroupRequestParticipants(ctx context.Context, group types.JID) ([]types.GroupParticipantRequest, error) {
 	return nil, nil
 }
 
-func (f *fakeWA) UpdateGroupRequestParticipants(ctx context.Context, group types.JID, users []types.JID, action wa.GroupParticipantRequestAction) ([]types.GroupParticipant, error) {
-	out := make([]types.GroupParticipant, 0, len(users))
-	for _, u := range users {
-		out = append(out, types.GroupParticipant{JID: u})
-	}
-	return out, nil
-}
-
-func (f *fakeWA) GetGroupInviteLink(ctx context.Context, group types.JID, reset bool) (string, error) {
+func (f *fakeWA) GetGroupInviteLink(ctx context.Context, group types.JID) (string, error) {
 	return "https://chat.whatsapp.com/invite/test", nil
 }
-
-func (f *fakeWA) JoinGroupWithLink(ctx context.Context, code string) (types.JID, error) {
-	return types.ParseJID("12345@g.us")
-}
-
-func (f *fakeWA) LeaveGroup(ctx context.Context, group types.JID) error { return nil }
 
 func (f *fakeWA) GetNewsletterInfoWithInvite(ctx context.Context, key string) (*types.NewsletterMetadata, error) {
 	f.mu.Lock()
@@ -586,10 +386,6 @@ func (f *fakeWA) GetNewsletterInfoWithInvite(ctx context.Context, key string) (*
 	}
 	return nil, nil
 }
-
-func (f *fakeWA) FollowNewsletter(ctx context.Context, jid types.JID) error { return nil }
-
-func (f *fakeWA) UnfollowNewsletter(ctx context.Context, jid types.JID) error { return nil }
 
 func (f *fakeWA) GetSubscribedNewsletters(ctx context.Context) ([]*types.NewsletterMetadata, error) {
 	f.mu.Lock()
@@ -608,48 +404,6 @@ func (f *fakeWA) GetNewsletterInfo(ctx context.Context, jid types.JID) (*types.N
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.news[jid], nil
-}
-
-func (f *fakeWA) SendText(ctx context.Context, to types.JID, text string) (types.MessageID, error) {
-	return types.MessageID("msgid"), nil
-}
-
-func (f *fakeWA) SendProtoMessage(ctx context.Context, to types.JID, msg *waProto.Message) (types.MessageID, error) {
-	return f.SendProtoMessageWithExtra(ctx, to, msg, "")
-}
-
-func (f *fakeWA) SendProtoMessageWithExtra(ctx context.Context, to types.JID, msg *waProto.Message, mediaHandle string) (types.MessageID, error) {
-	return types.MessageID("msgid"), nil
-}
-
-func (f *fakeWA) SendReaction(ctx context.Context, chat, sender types.JID, targetID types.MessageID, reaction string) (types.MessageID, error) {
-	return types.MessageID("reactionid"), nil
-}
-
-func (f *fakeWA) SendPoll(ctx context.Context, to types.JID, name string, options []string, selectable int, ephemeral bool) (types.MessageID, error) {
-	f.mu.Lock()
-	f.sendPollCalls = append(f.sendPollCalls, fakeSendPollCall{
-		to:         to,
-		name:       name,
-		options:    append([]string(nil), options...),
-		selectable: selectable,
-		ephemeral:  ephemeral,
-	})
-	f.mu.Unlock()
-	return types.MessageID("pollid"), nil
-}
-
-func (f *fakeWA) SendPollVote(ctx context.Context, pollInfo *types.MessageInfo, options []string) (types.MessageID, error) {
-	if pollInfo == nil {
-		return "", fmt.Errorf("poll info required")
-	}
-	f.mu.Lock()
-	f.sendPollVoteCalls = append(f.sendPollVoteCalls, fakeSendPollVoteCall{
-		pollInfo: *pollInfo,
-		options:  append([]string(nil), options...),
-	})
-	f.mu.Unlock()
-	return types.MessageID("pollvoteid"), nil
 }
 
 func (f *fakeWA) DecryptPollVote(ctx context.Context, evt *events.Message) (*waE2E.PollVoteMessage, error) {
@@ -673,60 +427,6 @@ func (f *fakeWA) DecryptSecretEncryptedMessage(ctx context.Context, evt *events.
 		return cb(evt)
 	}
 	return nil, fmt.Errorf("not supported")
-}
-
-func (f *fakeWA) RevokeMessage(ctx context.Context, chat types.JID, targetID types.MessageID) (types.MessageID, error) {
-	return types.MessageID("revokeid"), nil
-}
-
-func (f *fakeWA) EditMessage(ctx context.Context, chat types.JID, targetID types.MessageID, text string) (types.MessageID, error) {
-	return types.MessageID("editid"), nil
-}
-
-func (f *fakeWA) Upload(ctx context.Context, data []byte, mediaType whatsmeow.MediaType) (whatsmeow.UploadResponse, error) {
-	return whatsmeow.UploadResponse{}, nil
-}
-
-func (f *fakeWA) UploadNewsletter(ctx context.Context, data []byte, mediaType whatsmeow.MediaType) (whatsmeow.UploadResponse, error) {
-	return whatsmeow.UploadResponse{Handle: "newsletter-media-handle"}, nil
-}
-
-func (f *fakeWA) SendChatPresence(ctx context.Context, jid types.JID, state types.ChatPresence, media types.ChatPresenceMedia) error {
-	return nil
-}
-
-func (f *fakeWA) SendPresence(ctx context.Context, presence types.Presence) error {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.presenceCalls = append(f.presenceCalls, presence)
-	return f.sendPresenceErr
-}
-
-func (f *fakeWA) SubscribePresence(ctx context.Context, jid types.JID) error {
-	f.mu.Lock()
-	f.presenceSubscribeAttempts = append(f.presenceSubscribeAttempts, jid)
-	slow := f.slowSubscribePresence
-	f.mu.Unlock()
-	if slow != nil {
-		if err := slow(ctx, jid); err != nil {
-			return err
-		}
-	}
-	f.mu.Lock()
-	if f.subscribePresenceErr != nil {
-		err := f.subscribePresenceErr
-		f.mu.Unlock()
-		return err
-	}
-	f.presenceSubscriptions = append(f.presenceSubscriptions, jid)
-	hook := f.onSubscribePresence
-	f.mu.Unlock()
-	if hook != nil {
-		if evt := hook(jid); evt != nil {
-			f.emit(evt)
-		}
-	}
-	return nil
 }
 
 func (f *fakeWA) DecryptReaction(ctx context.Context, reaction *events.Message) (*waProto.ReactionMessage, error) {
@@ -836,26 +536,6 @@ func (f *fakeWA) SendMediaRetryReceipt(ctx context.Context, info *types.MessageI
 	return nil
 }
 
-func (f *fakeWA) MarkRead(ctx context.Context, ids []types.MessageID, timestamp time.Time, chat, sender types.JID, addressing types.AddressingMode) (types.ReceiptType, error) {
-	f.mu.Lock()
-	if f.readReceiptErr != nil {
-		err := f.readReceiptErr
-		f.mu.Unlock()
-		return "", err
-	}
-	f.readReceiptCalls = append(f.readReceiptCalls, fakeReadReceiptCall{ids: append([]types.MessageID(nil), ids...), timestamp: timestamp, chat: chat, sender: sender, addressing: addressing})
-	index := len(f.readReceiptCalls) - 1
-	hook, kind := f.onReadReceipt, f.readReceiptType
-	f.mu.Unlock()
-	if hook != nil {
-		return hook(index)
-	}
-	if kind != "" {
-		return kind, nil
-	}
-	return wa.ReadReceiptUnknown, nil
-}
-
 func (f *fakeWA) RequestHistorySyncOnDemand(ctx context.Context, lastKnown types.MessageInfo, count int) (types.MessageID, error) {
 	f.mu.Lock()
 	if f.onDemandErr != nil {
@@ -911,56 +591,6 @@ func (f *fakeWA) RequestAppStateRecovery(ctx context.Context, name string) (type
 		hook(name)
 	}
 	return types.MessageID("recovery-req"), nil
-}
-
-func (f *fakeWA) DeleteMessageForMe(ctx context.Context, info types.MessageInfo, deleteMedia bool) error {
-	return nil
-}
-
-func (f *fakeWA) ArchiveChat(ctx context.Context, target types.JID, archive bool, lastMsgTS time.Time, lastMsgKey *waCommon.MessageKey, beforeApply func()) ([]any, error) {
-	f.mu.Lock()
-	f.archiveCalls = append(f.archiveCalls, fakeArchiveCall{target: target, archive: archive, lastMsgTS: lastMsgTS, lastMsgKey: lastMsgKey})
-	eventCB := f.archiveEvent
-	f.mu.Unlock()
-	beforeApply()
-	if eventCB != nil {
-		if evt := eventCB(); evt != nil {
-			return []any{evt}, f.archiveErr
-		}
-	}
-	return nil, f.archiveErr
-}
-
-func (f *fakeWA) PinChat(ctx context.Context, target types.JID, pin bool, beforeApply func()) ([]any, error) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.pinCalls = append(f.pinCalls, fakePinCall{target: target, pin: pin})
-	beforeApply()
-	return nil, nil
-}
-
-func (f *fakeWA) MuteChat(ctx context.Context, target types.JID, mute bool, duration time.Duration, beforeApply func()) ([]any, error) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.muteCalls = append(f.muteCalls, fakeMuteCall{target: target, mute: mute, duration: duration})
-	beforeApply()
-	return nil, nil
-}
-
-func (f *fakeWA) MarkChatAsRead(ctx context.Context, target types.JID, read bool, lastMsgTS time.Time, lastMsgKey *waCommon.MessageKey, beforeApply func()) ([]any, error) {
-	f.mu.Lock()
-	f.markReadCalls = append(f.markReadCalls, fakeMarkReadCall{target: target, read: read, lastMsgTS: lastMsgTS, lastMsgKey: lastMsgKey})
-	hook := f.markReadBeforeApply
-	afterApply := f.markReadAfterApply
-	f.mu.Unlock()
-	if hook != nil {
-		hook()
-	}
-	beforeApply()
-	if afterApply != nil {
-		afterApply()
-	}
-	return nil, nil
 }
 
 func (f *fakeWA) FetchAppState(ctx context.Context, name string, fullSync, onlyIfNotSynced bool) error {
@@ -1019,63 +649,8 @@ func (f *fakeWA) FetchAppStateEvents(ctx context.Context, name string, fullSync,
 	return []any{evt}, nil
 }
 
-func (f *fakeWA) Logout(ctx context.Context) error {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.authed = false
-	return nil
-}
-
-func (f *fakeWA) SetProfilePicture(ctx context.Context, avatar []byte) (string, error) {
-	return "pic-id-fake", nil
-}
-
 func (f *fakeWA) GetProfilePictureInfo(ctx context.Context, jid types.JID, preview bool, existingID string) (*types.ProfilePictureInfo, error) {
 	return &types.ProfilePictureInfo{ID: "pic-id-fake", URL: "https://example.invalid/avatar.jpg", Type: "image"}, nil
-}
-
-func (f *fakeWA) SetStatusMessage(ctx context.Context, msg string) error {
-	return nil
-}
-
-func (f *fakeWA) SetProfileName(ctx context.Context, name string) error {
-	return nil
-}
-
-type fakeSaveContactCall struct {
-	target, lid         types.JID
-	fullName, firstName string
-	phonebook           bool
-}
-
-// SendAppStatePatch models whatsmeow's SendAppState: the persistence boundary runs
-// before the send, then afterSend models the post-send fetch, whose events
-// whatsmeow dispatches from a goroutine before returning. Without afterSend,
-// a successful send models the plain post-send fetch: whatsmeow fetches the
-// collection from the version the patch was built on, so the batch holds our
-// own mutation (indexed by the phone number, as BuildSaveContact emits it),
-// which it writes to its contact store before SendAppState returns.
-func (f *fakeWA) SendAppStatePatch(ctx context.Context, patch appstate.PatchInfo, beforeApply func()) ([]any, error) {
-	action := patch.Mutations[0].Value.GetContactAction()
-	target, _ := types.ParseJID(action.GetPnJID())
-	lid, _ := types.ParseJID(action.GetLidJID())
-	call := fakeSaveContactCall{target: target, lid: lid, fullName: action.GetFullName(), firstName: action.GetFirstName(), phonebook: action.GetSaveOnPrimaryAddressbook()}
-	f.mu.Lock()
-	f.saveContactCalls = append(f.saveContactCalls, call)
-	err := f.saveContactErr
-	errAfterSend := f.saveContactErrAfterSend
-	afterSend := f.saveContactAfterSend
-	f.mu.Unlock()
-	beforeApply()
-	if err != nil {
-		return nil, err
-	}
-	if afterSend != nil {
-		afterSend(call)
-	} else {
-		f.applyContactBatch(contactEvent(call.target, call.fullName, call.firstName))()
-	}
-	return nil, errAfterSend
 }
 
 // applyContactBatch models whatsmeow applying one fetched batch of contact

@@ -12,10 +12,7 @@ import (
 	"github.com/openclaw/wacli/internal/out"
 	"github.com/openclaw/wacli/internal/store"
 	"github.com/openclaw/wacli/internal/wa"
-	"go.mau.fi/whatsmeow"
-	"go.mau.fi/whatsmeow/appstate"
 	waProto "go.mau.fi/whatsmeow/binary/proto"
-	"go.mau.fi/whatsmeow/proto/waCommon"
 	"go.mau.fi/whatsmeow/proto/waE2E"
 	"go.mau.fi/whatsmeow/proto/waHistorySync"
 	"go.mau.fi/whatsmeow/proto/waWeb"
@@ -45,49 +42,19 @@ type WAClient interface {
 
 	GetJoinedGroups(ctx context.Context) ([]*types.GroupInfo, error)
 	GetGroupInfo(ctx context.Context, jid types.JID) (*types.GroupInfo, error)
-	CreateGroup(ctx context.Context, req wa.CreateGroupRequest) (*types.GroupInfo, error)
-	SetGroupName(ctx context.Context, jid types.JID, name string) error
-	SetGroupTopic(ctx context.Context, jid types.JID, topic string) error
-	SetGroupAnnounce(ctx context.Context, jid types.JID, announce bool) error
-	SetGroupLocked(ctx context.Context, jid types.JID, locked bool) error
-	UpdateGroupParticipants(ctx context.Context, group types.JID, users []types.JID, action wa.GroupParticipantAction) ([]types.GroupParticipant, error)
 	GetGroupRequestParticipants(ctx context.Context, group types.JID) ([]types.GroupParticipantRequest, error)
-	UpdateGroupRequestParticipants(ctx context.Context, group types.JID, users []types.JID, action wa.GroupParticipantRequestAction) ([]types.GroupParticipant, error)
-	GetGroupInviteLink(ctx context.Context, group types.JID, reset bool) (string, error)
-	JoinGroupWithLink(ctx context.Context, code string) (types.JID, error)
-	LeaveGroup(ctx context.Context, group types.JID) error
+	GetGroupInviteLink(ctx context.Context, group types.JID) (string, error)
 
 	GetNewsletterInfoWithInvite(ctx context.Context, key string) (*types.NewsletterMetadata, error)
-	FollowNewsletter(ctx context.Context, jid types.JID) error
-	UnfollowNewsletter(ctx context.Context, jid types.JID) error
 	GetSubscribedNewsletters(ctx context.Context) ([]*types.NewsletterMetadata, error)
 	GetNewsletterInfo(ctx context.Context, jid types.JID) (*types.NewsletterMetadata, error)
 
-	SendText(ctx context.Context, to types.JID, text string) (types.MessageID, error)
-	SendProtoMessage(ctx context.Context, to types.JID, msg *waProto.Message) (types.MessageID, error)
-	SendProtoMessageWithExtra(ctx context.Context, to types.JID, msg *waProto.Message, mediaHandle string) (types.MessageID, error)
-	SendReaction(ctx context.Context, chat, sender types.JID, targetID types.MessageID, reaction string) (types.MessageID, error)
-	SendPoll(ctx context.Context, to types.JID, name string, options []string, selectable int, ephemeral bool) (types.MessageID, error)
-	SendPollVote(ctx context.Context, pollInfo *types.MessageInfo, options []string) (types.MessageID, error)
 	DecryptPollVote(ctx context.Context, evt *events.Message) (*waE2E.PollVoteMessage, error)
 	DecryptSecretEncryptedMessage(ctx context.Context, evt *events.Message) (*waE2E.Message, error)
-	RevokeMessage(ctx context.Context, chat types.JID, targetID types.MessageID) (types.MessageID, error)
-	DeleteMessageForMe(ctx context.Context, info types.MessageInfo, deleteMedia bool) error
-	EditMessage(ctx context.Context, chat types.JID, targetID types.MessageID, text string) (types.MessageID, error)
-	ArchiveChat(ctx context.Context, target types.JID, archive bool, lastMsgTS time.Time, lastMsgKey *waCommon.MessageKey, beforeApply func()) ([]any, error)
-	PinChat(ctx context.Context, target types.JID, pin bool, beforeApply func()) ([]any, error)
-	MuteChat(ctx context.Context, target types.JID, mute bool, duration time.Duration, beforeApply func()) ([]any, error)
-	MarkChatAsRead(ctx context.Context, target types.JID, read bool, lastMsgTS time.Time, lastMsgKey *waCommon.MessageKey, beforeApply func()) ([]any, error)
-	Upload(ctx context.Context, data []byte, mediaType whatsmeow.MediaType) (whatsmeow.UploadResponse, error)
-	UploadNewsletter(ctx context.Context, data []byte, mediaType whatsmeow.MediaType) (whatsmeow.UploadResponse, error)
 	DownloadMediaToFile(ctx context.Context, directPath string, encFileHash, fileHash, mediaKey []byte, fileLength uint64, mediaType, mmsType string, targetPath string) (int64, error)
 	DownloadRetriedMediaToFile(ctx context.Context, directPath string, fileHash, mediaKey []byte, fileLength uint64, mediaType, targetPath string) (int64, error)
 	SendMediaRetryReceipt(ctx context.Context, info *types.MessageInfo, mediaKey []byte) error
-	MarkRead(ctx context.Context, ids []types.MessageID, timestamp time.Time, chat, sender types.JID, addressing types.AddressingMode) (types.ReceiptType, error)
 
-	SendChatPresence(ctx context.Context, jid types.JID, state types.ChatPresence, media types.ChatPresenceMedia) error
-	SendPresence(ctx context.Context, presence types.Presence) error
-	SubscribePresence(ctx context.Context, jid types.JID) error
 	ParseWebMessage(chatJID types.JID, webMsg *waWeb.WebMessageInfo) (*events.Message, error)
 	DecryptReaction(ctx context.Context, reaction *events.Message) (*waProto.ReactionMessage, error)
 	SetManualHistorySyncDownload(enabled bool)
@@ -99,15 +66,10 @@ type WAClient interface {
 	RequestAppStateRecovery(ctx context.Context, name string) (types.MessageID, error)
 	HasLocalAppState(ctx context.Context, name string) (bool, error)
 	ContactJournal() *wa.ContactStoreJournal
-	Logout(ctx context.Context) error
 	LinkedJID() string
 	LinkedLID() string
 
-	SetProfilePicture(ctx context.Context, avatar []byte) (string, error)
 	GetProfilePictureInfo(ctx context.Context, jid types.JID, preview bool, existingID string) (*types.ProfilePictureInfo, error)
-	SetStatusMessage(ctx context.Context, msg string) error
-	SetProfileName(ctx context.Context, name string) error
-	SendAppStatePatch(ctx context.Context, patch appstate.PatchInfo, beforeApply func()) ([]any, error)
 	GetBusinessProfile(ctx context.Context, jid types.JID) (*types.BusinessProfile, error)
 }
 
@@ -146,11 +108,8 @@ type App struct {
 	manualFetchMu    sync.Mutex
 	manualFetches    map[string]int
 	// contactDrainMu serializes drains of the contact store journal from
-	// snapshot to acknowledgement, and guards contactDebts: the write-ahead
-	// intents of this process's contact saves, each settled by the first
-	// drain that mirrors the journal through the writes of its send.
+	// snapshot to acknowledgement.
 	contactDrainMu sync.Mutex
-	contactDebts   []contactDebt
 	// Degraded app-state mode: collections whose last full sync is known not
 	// to verify (mirrored durably in wacli.db and rehydrated once per
 	// process), and the time of the last background recovery request per
@@ -161,7 +120,6 @@ type App struct {
 	appStateRecoveryRequested map[string]time.Time
 	heartbeatLast             atomic.Int64
 	groupInfo                 groupInfoCache
-	presenceWatch             presenceWatch
 }
 
 func New(opts Options) (*App, error) {
@@ -207,8 +165,7 @@ func (a *App) OpenWA() error {
 		if err != nil {
 			return err
 		}
-		// Read-only build: wrap every client in the guard so no code path
-		// can send or mutate WhatsApp state, regardless of which command runs.
+		// Every client goes behind the guard; see guard.go.
 		a.wa = guardWAClient(cli)
 	}
 	if a.sessionState == nil {

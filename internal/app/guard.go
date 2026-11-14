@@ -2,14 +2,10 @@ package app
 
 import (
 	"context"
-	"errors"
 	"time"
 
 	"github.com/openclaw/wacli/internal/wa"
-	"go.mau.fi/whatsmeow"
-	"go.mau.fi/whatsmeow/appstate"
 	waProto "go.mau.fi/whatsmeow/binary/proto"
-	"go.mau.fi/whatsmeow/proto/waCommon"
 	"go.mau.fi/whatsmeow/proto/waE2E"
 	"go.mau.fi/whatsmeow/proto/waHistorySync"
 	"go.mau.fi/whatsmeow/proto/waWeb"
@@ -17,213 +13,24 @@ import (
 	"go.mau.fi/whatsmeow/types/events"
 )
 
-// errWAMutationBlocked is returned by every WAClient method that would mutate
-// WhatsApp state. This build is a read-only fork: sync and read operations are
-// allowed, sending and mutating are compiled out at the client boundary.
-var errWAMutationBlocked = errors.New("wacli read-only build: mutating WhatsApp is disabled in this binary")
-
-// guardWA wraps a WAClient and hard-blocks every operation that would change
-// WhatsApp state visible to others: messages, reactions, polls, edits,
-// revokes, read receipts, chat state (read/archive/pin/mute), contact saves,
-// group and profile changes, follows, presence subscriptions, and logout.
+// guardWA is the only way the app reaches the WhatsApp client. This build
+// cannot send to or change WhatsApp: WAClient and wa.Client have no method
+// that does, and the guard keeps it that way.
 //
 // It deliberately does not embed the wrapped client. Every WAClient method is
-// written out below, so a method upstream adds later does not pass through by
-// default: the build fails until someone decides here whether it reads or
-// mutates. guard_test.go holds the same decision as a list and fails when the
-// two disagree.
-//
-// Read operations and the protocol traffic required for syncing pass through:
-// app-state fetches and recovery requests, history-sync requests, downloads,
-// and media retry receipts (a media retry receipt only asks the account's own
-// phone to upload media again that we could not download; nothing appears in
-// any chat).
-//
-// Presence updates are dropped silently so the session stays passive and never
-// announces itself as online or typing. That includes the available presence
-// the client would otherwise send right after connecting.
+// written out below, so a method added to the interface does not pass through
+// by default: the build fails until someone reads what it does on the wire and
+// writes it here. Only add a method that reads, decodes locally, or carries
+// the protocol traffic syncing needs: app-state fetches and recovery requests,
+// history-sync requests, downloads, and media retry receipts (a media retry
+// receipt only asks the account's own phone to upload media again that we
+// could not download; nothing appears in any chat). guard_test.go holds the
+// same list, and the names that must never come back.
 type guardWA struct{ inner WAClient }
 
 var _ WAClient = (*guardWA)(nil)
 
 func guardWAClient(inner WAClient) WAClient { return &guardWA{inner: inner} }
-
-// --- presence: silently dropped -------------------------------------------
-
-func (g *guardWA) SendPresence(ctx context.Context, presence types.Presence) error {
-	return nil
-}
-
-func (g *guardWA) SendChatPresence(ctx context.Context, jid types.JID, state types.ChatPresence, media types.ChatPresenceMedia) error {
-	return nil
-}
-
-// --- conditional ----------------------------------------------------------
-
-func (g *guardWA) Connect(ctx context.Context, opts wa.ConnectOptions) error {
-	opts.SuppressInitialAvailablePresence = true
-	return g.inner.Connect(ctx, opts)
-}
-
-func (g *guardWA) ReconnectWithBackoff(ctx context.Context, minDelay, maxDelay time.Duration, opts wa.ConnectOptions) error {
-	opts.SuppressInitialAvailablePresence = true
-	return g.inner.ReconnectWithBackoff(ctx, minDelay, maxDelay, opts)
-}
-
-func (g *guardWA) GetGroupInviteLink(ctx context.Context, group types.JID, reset bool) (string, error) {
-	if reset {
-		return "", errWAMutationBlocked
-	}
-	return g.inner.GetGroupInviteLink(ctx, group, reset)
-}
-
-func (g *guardWA) Logout(ctx context.Context) error {
-	return errors.New("wacli read-only build: this binary cannot remove the device on WhatsApp; remove it on your phone under Linked devices (`wacli auth logout` clears the local session)")
-}
-
-// --- blocked: messages ----------------------------------------------------
-
-func (g *guardWA) SendText(ctx context.Context, to types.JID, text string) (types.MessageID, error) {
-	return "", errWAMutationBlocked
-}
-
-func (g *guardWA) SendProtoMessage(ctx context.Context, to types.JID, msg *waProto.Message) (types.MessageID, error) {
-	return "", errWAMutationBlocked
-}
-
-func (g *guardWA) SendProtoMessageWithExtra(ctx context.Context, to types.JID, msg *waProto.Message, mediaHandle string) (types.MessageID, error) {
-	return "", errWAMutationBlocked
-}
-
-func (g *guardWA) SendReaction(ctx context.Context, chat, sender types.JID, targetID types.MessageID, reaction string) (types.MessageID, error) {
-	return "", errWAMutationBlocked
-}
-
-func (g *guardWA) SendPoll(ctx context.Context, to types.JID, name string, options []string, selectable int, ephemeral bool) (types.MessageID, error) {
-	return "", errWAMutationBlocked
-}
-
-func (g *guardWA) SendPollVote(ctx context.Context, pollInfo *types.MessageInfo, options []string) (types.MessageID, error) {
-	return "", errWAMutationBlocked
-}
-
-func (g *guardWA) RevokeMessage(ctx context.Context, chat types.JID, targetID types.MessageID) (types.MessageID, error) {
-	return "", errWAMutationBlocked
-}
-
-func (g *guardWA) EditMessage(ctx context.Context, chat types.JID, targetID types.MessageID, text string) (types.MessageID, error) {
-	return "", errWAMutationBlocked
-}
-
-func (g *guardWA) DeleteMessageForMe(ctx context.Context, info types.MessageInfo, deleteMedia bool) error {
-	return errWAMutationBlocked
-}
-
-// MarkRead sends read receipts: the sender sees blue ticks.
-func (g *guardWA) MarkRead(ctx context.Context, ids []types.MessageID, timestamp time.Time, chat, sender types.JID, addressing types.AddressingMode) (types.ReceiptType, error) {
-	return "", errWAMutationBlocked
-}
-
-// --- blocked: chat and account state ----------------------------------------
-
-func (g *guardWA) ArchiveChat(ctx context.Context, target types.JID, archive bool, lastMsgTS time.Time, lastMsgKey *waCommon.MessageKey, beforeApply func()) ([]any, error) {
-	return nil, errWAMutationBlocked
-}
-
-func (g *guardWA) PinChat(ctx context.Context, target types.JID, pin bool, beforeApply func()) ([]any, error) {
-	return nil, errWAMutationBlocked
-}
-
-func (g *guardWA) MuteChat(ctx context.Context, target types.JID, mute bool, duration time.Duration, beforeApply func()) ([]any, error) {
-	return nil, errWAMutationBlocked
-}
-
-func (g *guardWA) MarkChatAsRead(ctx context.Context, target types.JID, read bool, lastMsgTS time.Time, lastMsgKey *waCommon.MessageKey, beforeApply func()) ([]any, error) {
-	return nil, errWAMutationBlocked
-}
-
-// SendAppStatePatch writes an arbitrary patch to the account (contact saves
-// go through it).
-func (g *guardWA) SendAppStatePatch(ctx context.Context, patch appstate.PatchInfo, beforeApply func()) ([]any, error) {
-	return nil, errWAMutationBlocked
-}
-
-// SubscribePresence asks WhatsApp to report when a contact is online. It only
-// works for an account that shows itself as online, which this build never
-// does.
-func (g *guardWA) SubscribePresence(ctx context.Context, jid types.JID) error {
-	return errWAMutationBlocked
-}
-
-// --- blocked: groups --------------------------------------------------------
-
-func (g *guardWA) CreateGroup(ctx context.Context, req wa.CreateGroupRequest) (*types.GroupInfo, error) {
-	return nil, errWAMutationBlocked
-}
-
-func (g *guardWA) SetGroupName(ctx context.Context, jid types.JID, name string) error {
-	return errWAMutationBlocked
-}
-
-func (g *guardWA) SetGroupTopic(ctx context.Context, jid types.JID, topic string) error {
-	return errWAMutationBlocked
-}
-
-func (g *guardWA) SetGroupAnnounce(ctx context.Context, jid types.JID, announce bool) error {
-	return errWAMutationBlocked
-}
-
-func (g *guardWA) SetGroupLocked(ctx context.Context, jid types.JID, locked bool) error {
-	return errWAMutationBlocked
-}
-
-func (g *guardWA) UpdateGroupParticipants(ctx context.Context, group types.JID, users []types.JID, action wa.GroupParticipantAction) ([]types.GroupParticipant, error) {
-	return nil, errWAMutationBlocked
-}
-
-func (g *guardWA) UpdateGroupRequestParticipants(ctx context.Context, group types.JID, users []types.JID, action wa.GroupParticipantRequestAction) ([]types.GroupParticipant, error) {
-	return nil, errWAMutationBlocked
-}
-
-func (g *guardWA) JoinGroupWithLink(ctx context.Context, code string) (types.JID, error) {
-	return types.JID{}, errWAMutationBlocked
-}
-
-func (g *guardWA) LeaveGroup(ctx context.Context, group types.JID) error {
-	return errWAMutationBlocked
-}
-
-// --- blocked: channels ------------------------------------------------------
-
-func (g *guardWA) FollowNewsletter(ctx context.Context, jid types.JID) error {
-	return errWAMutationBlocked
-}
-
-func (g *guardWA) UnfollowNewsletter(ctx context.Context, jid types.JID) error {
-	return errWAMutationBlocked
-}
-
-// --- blocked: profile and media upload --------------------------------------
-
-func (g *guardWA) SetProfilePicture(ctx context.Context, avatar []byte) (string, error) {
-	return "", errWAMutationBlocked
-}
-
-func (g *guardWA) SetStatusMessage(ctx context.Context, msg string) error {
-	return errWAMutationBlocked
-}
-
-func (g *guardWA) SetProfileName(ctx context.Context, name string) error {
-	return errWAMutationBlocked
-}
-
-func (g *guardWA) Upload(ctx context.Context, data []byte, mediaType whatsmeow.MediaType) (whatsmeow.UploadResponse, error) {
-	return whatsmeow.UploadResponse{}, errWAMutationBlocked
-}
-
-func (g *guardWA) UploadNewsletter(ctx context.Context, data []byte, mediaType whatsmeow.MediaType) (whatsmeow.UploadResponse, error) {
-	return whatsmeow.UploadResponse{}, errWAMutationBlocked
-}
 
 // --- passed through: connection ---------------------------------------------
 
@@ -236,6 +43,14 @@ func (g *guardWA) LinkedLID() string { return g.inner.LinkedLID() }
 
 func (g *guardWA) SetAutoReconnect(enabled bool) (bool, bool) {
 	return g.inner.SetAutoReconnect(enabled)
+}
+
+func (g *guardWA) Connect(ctx context.Context, opts wa.ConnectOptions) error {
+	return g.inner.Connect(ctx, opts)
+}
+
+func (g *guardWA) ReconnectWithBackoff(ctx context.Context, minDelay, maxDelay time.Duration, opts wa.ConnectOptions) error {
+	return g.inner.ReconnectWithBackoff(ctx, minDelay, maxDelay, opts)
 }
 
 func (g *guardWA) AddEventHandler(handler func(any)) uint32 { return g.inner.AddEventHandler(handler) }
@@ -283,6 +98,10 @@ func (g *guardWA) GetGroupInfo(ctx context.Context, jid types.JID) (*types.Group
 
 func (g *guardWA) GetGroupRequestParticipants(ctx context.Context, group types.JID) ([]types.GroupParticipantRequest, error) {
 	return g.inner.GetGroupRequestParticipants(ctx, group)
+}
+
+func (g *guardWA) GetGroupInviteLink(ctx context.Context, group types.JID) (string, error) {
+	return g.inner.GetGroupInviteLink(ctx, group)
 }
 
 func (g *guardWA) GetNewsletterInfoWithInvite(ctx context.Context, key string) (*types.NewsletterMetadata, error) {

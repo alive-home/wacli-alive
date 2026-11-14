@@ -9,24 +9,23 @@ help:
 		'  build           Build the CLI into dist/wacli.' \
 		'  test            Run the full Go, FTS, cross-build, and docs test suite.' \
 		'  fmt             Check Go formatting.' \
-		'  lint            Run vet, vulnerability, and dead-code checks.' \
+		'  lint            Run vet and dead-code checks.' \
 		'  check           Run every local gate.'
 
 build:
-	GOWORK=off pnpm --silent build
+	GOWORK=off bun run --silent build
 
 test:
-	GOWORK=off pnpm --silent test
+	GOWORK=off bun run --silent test
 
 fmt:
-	GOWORK=off pnpm --silent format:check
+	GOWORK=off bun run --silent format:check
 
 lint:
-	GOWORK=off pnpm --silent lint
+	GOWORK=off bun run --silent lint
 	@test "$$(GOWORK=off go env GOVERSION)" = go1.27.3
-	GOWORK=off pnpm --silent govulncheck:source
-	GOWORK=off pnpm --silent lint:deadcode
+	GOWORK=off bun run --silent lint:deadcode
 
 check: fmt lint test build
-	GOWORK=off pnpm --silent docs:site
+	GOWORK=off bun run --silent docs:site
 	git diff --check

@@ -109,4 +109,12 @@ test("docs site build renders structured heading facts into the generated page",
   assert.match(page, /href="#at-t-bold">AT&amp;T bold<\/a>/);
   assert.match(page, /href="#img-onerror-alert-1-https-example-com">&lt;img onerror=alert\(1\)&gt;<\/a>/);
   assert.equal(page.includes("<img onerror="), false);
+
+  // Links a reader clicks may point out; nothing the page loads by itself may.
+  const loads = /<(?:script|img|iframe|source)\b[^>]*\ssrc="(?:https?:)?\/\/|<link\b(?![^>]*rel="canonical")[^>]*\shref="(?:https?:)?\/\/|@import|url\(\s*["']?(?:https?:)?\/\//;
+  for (const name of fs.readdirSync(path.join(root, "dist", "docs-site"))) {
+    if (!name.endsWith(".html")) continue;
+    const html = fs.readFileSync(path.join(root, "dist", "docs-site", name), "utf8");
+    assert.equal(loads.test(html), false, `${name} loads something from the network`);
+  }
 });

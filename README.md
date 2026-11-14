@@ -22,7 +22,7 @@ This build cannot send messages or change anything on WhatsApp.
 - Change groups, channels, contacts, or your profile.
 - Remove itself from your account. To do that, open WhatsApp on your phone, go to **Linked devices**, and remove it there. `wacli auth logout` only clears the session on this machine.
 
-These commands are not in the binary. Running one prints that it is not available and exits with an error. Underneath the commands, every call to WhatsApp goes through one guard that refuses anything that sends or changes state, so a command that slipped through would still be refused.
+These commands are not in the binary. Running one prints that it is not available and exits with an error. Underneath the commands, wacli's own code that sends or changes state is removed too: a command that slipped through would have nothing to call. whatsmeow, the WhatsApp library underneath, still contains its send functions; nothing in this build calls them, and a test fails when something does.
 
 ## What leaves your machine
 
@@ -118,12 +118,11 @@ See [accounts](docs/accounts.md) for store selection and [sync](docs/sync.md) fo
 
 ## Development
 
-Development uses the Go 1.27.3 toolchain selected by `go.mod`, Node.js 24 or newer, pnpm, cgo, and a C compiler.
+Development uses the Go 1.27.3 toolchain selected by `go.mod`, cgo, a C compiler, and [Bun](https://bun.sh) to run the scripts in `package.json`. There are no packages to install.
 
 ```sh
-pnpm install --frozen-lockfile
-pnpm build
-pnpm format:check && pnpm lint && pnpm test
+bun run build
+bun run check
 ```
 
 [AGENTS.md](AGENTS.md) describes how the read-only guarantee is enforced and how to merge upstream without losing it.

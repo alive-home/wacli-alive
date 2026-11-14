@@ -1,4 +1,4 @@
-#!/usr/bin/env node
+#!/usr/bin/env bun
 import fs from "node:fs";
 import path from "node:path";
 
@@ -321,9 +321,6 @@ function layout({ page, html, toc, prev, next, sectionName }) {
   <meta name="description" content="${escapeAttr(description)}">
   ${socialMeta}
   <link rel="icon" href="${rootPrefix}favicon.svg" type="image/svg+xml">
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
   <script>${themeBootstrapScript()}</script>
   <style>${css()}</style>
 </head>

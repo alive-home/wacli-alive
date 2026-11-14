@@ -2,45 +2,22 @@ package app
 
 import (
 	"context"
-	"errors"
 	"reflect"
-	"slices"
 	"testing"
-	"time"
 
 	"github.com/openclaw/wacli/internal/wa"
-	"go.mau.fi/whatsmeow/types"
 )
 
-// The read-only decision for every WAClient method. A method upstream adds
-// must be put in one of these lists (and written out in guard.go) before the
-// tests pass; when in doubt it belongs in guardBlocked.
-
-// guardBlocked methods return errWAMutationBlocked without reaching WhatsApp.
-var guardBlocked = []string{
-	"SendText", "SendProtoMessage", "SendProtoMessageWithExtra", "SendReaction",
-	"SendPoll", "SendPollVote", "RevokeMessage", "EditMessage", "DeleteMessageForMe",
-	"MarkRead",
-	"ArchiveChat", "PinChat", "MuteChat", "MarkChatAsRead", "SendAppStatePatch",
-	"SubscribePresence",
-	"CreateGroup", "SetGroupName", "SetGroupTopic", "SetGroupAnnounce", "SetGroupLocked",
-	"UpdateGroupParticipants", "UpdateGroupRequestParticipants", "JoinGroupWithLink", "LeaveGroup",
-	"FollowNewsletter", "UnfollowNewsletter",
-	"SetProfilePicture", "SetStatusMessage", "SetProfileName",
-	"Upload", "UploadNewsletter",
-}
-
-// guardDropped methods report success without reaching WhatsApp.
-var guardDropped = []string{"SendPresence", "SendChatPresence"}
-
-// guardPassThrough methods read, decode locally, or carry the protocol
-// traffic syncing needs.
+// Every WAClient method, as guard.go writes them out. A method upstream adds
+// to the interface must be written out there and listed here before the tests
+// pass, and only if it reads, decodes locally, or carries the protocol traffic
+// syncing needs.
 var guardPassThrough = []string{
 	"Close", "Disconnect", "IsAuthed", "IsConnected", "LinkedJID", "LinkedLID",
-	"SetAutoReconnect", "AddEventHandler", "RemoveEventHandler",
+	"SetAutoReconnect", "Connect", "ReconnectWithBackoff", "AddEventHandler", "RemoveEventHandler",
 	"ResolveChatName", "ResolveLIDToPN", "ResolvePNToLID", "GetUserInfo", "IsOnWhatsApp",
 	"GetContact", "GetAllContacts", "ContactJournal",
-	"GetJoinedGroups", "GetGroupInfo", "GetGroupRequestParticipants",
+	"GetJoinedGroups", "GetGroupInfo", "GetGroupInviteLink", "GetGroupRequestParticipants",
 	"GetNewsletterInfoWithInvite", "GetSubscribedNewsletters", "GetNewsletterInfo",
 	"GetProfilePictureInfo", "GetBusinessProfile",
 	"DecryptPollVote", "DecryptSecretEncryptedMessage", "DecryptReaction", "ParseWebMessage",
@@ -50,27 +27,60 @@ var guardPassThrough = []string{
 	"RequestAppStateRecovery", "HasLocalAppState",
 }
 
-// guardSpecial methods have their own test below.
-var guardSpecial = []string{"Connect", "ReconnectWithBackoff", "GetGroupInviteLink", "Logout"}
+// removedMutations are the methods upstream's client has for sending to and
+// changing WhatsApp. This build removed them; none may come back, neither on
+// WAClient nor on the client underneath it.
+var removedMutations = []string{
+	"SendText", "SendProtoMessage", "SendProtoMessageWithExtra", "SendReaction",
+	"SendPoll", "SendPollVote", "RevokeMessage", "EditMessage", "DeleteMessageForMe",
+	"MarkRead",
+	"ArchiveChat", "PinChat", "MuteChat", "MarkChatAsRead", "SendAppState", "SendAppStatePatch",
+	"SendPresence", "SendChatPresence", "SubscribePresence",
+	"CreateGroup", "SetGroupName", "SetGroupTopic", "SetGroupAnnounce", "SetGroupLocked",
+	"UpdateGroupParticipants", "UpdateGroupRequestParticipants", "JoinGroupWithLink", "LeaveGroup",
+	"FollowNewsletter", "UnfollowNewsletter",
+	"SetProfilePicture", "SetStatusMessage", "SetProfileName",
+	"Upload", "UploadNewsletter",
+	"Logout",
+}
 
 var waClientType = reflect.TypeOf((*WAClient)(nil)).Elem()
 
 func TestGuardWAClassifiesEveryMethod(t *testing.T) {
 	seen := map[string]int{}
-	for _, list := range [][]string{guardBlocked, guardDropped, guardPassThrough, guardSpecial} {
-		for _, name := range list {
-			seen[name]++
-		}
+	for _, name := range guardPassThrough {
+		seen[name]++
 	}
 	for i := 0; i < waClientType.NumMethod(); i++ {
 		name := waClientType.Method(i).Name
 		if seen[name] != 1 {
-			t.Errorf("WAClient.%s is in %d guard lists, want exactly 1", name, seen[name])
+			t.Errorf("WAClient.%s is listed %d times in guardPassThrough, want once", name, seen[name])
 		}
 		delete(seen, name)
 	}
 	for name := range seen {
-		t.Errorf("guard lists name %s, which WAClient does not have", name)
+		t.Errorf("guardPassThrough names %s, which WAClient does not have", name)
+	}
+}
+
+// Nothing in this build can send to or change WhatsApp: the methods are gone
+// from the interface and from the client, and the client has no exported
+// method the interface (and so the guard and its list) does not know.
+func TestNoMutatingMethodExists(t *testing.T) {
+	clientType := reflect.TypeOf(&wa.Client{})
+	for _, name := range removedMutations {
+		if _, ok := waClientType.MethodByName(name); ok {
+			t.Errorf("WAClient has %s, which sends to or changes WhatsApp", name)
+		}
+		if _, ok := clientType.MethodByName(name); ok {
+			t.Errorf("wa.Client has %s, which sends to or changes WhatsApp", name)
+		}
+	}
+	for i := 0; i < clientType.NumMethod(); i++ {
+		name := clientType.Method(i).Name
+		if _, ok := waClientType.MethodByName(name); !ok {
+			t.Errorf("wa.Client.%s is not a WAClient method, so nothing classifies it", name)
+		}
 	}
 }
 
@@ -94,37 +104,6 @@ func callOnBareGuard(t *testing.T, name string) (results []reflect.Value, reache
 	return method.Call(args), false
 }
 
-func lastError(results []reflect.Value) error {
-	err, _ := results[len(results)-1].Interface().(error)
-	return err
-}
-
-func TestGuardWABlocksEveryMutation(t *testing.T) {
-	for _, name := range guardBlocked {
-		results, reachedInner := callOnBareGuard(t, name)
-		if reachedInner {
-			t.Errorf("%s reached the WhatsApp client, want blocked", name)
-			continue
-		}
-		if err := lastError(results); !errors.Is(err, errWAMutationBlocked) {
-			t.Errorf("%s err = %v, want errWAMutationBlocked", name, err)
-		}
-	}
-}
-
-func TestGuardWADropsPresenceSilently(t *testing.T) {
-	for _, name := range guardDropped {
-		results, reachedInner := callOnBareGuard(t, name)
-		if reachedInner {
-			t.Errorf("%s reached the WhatsApp client, want dropped", name)
-			continue
-		}
-		if err := lastError(results); err != nil {
-			t.Errorf("%s err = %v, want nil", name, err)
-		}
-	}
-}
-
 func TestGuardWAPassesReadsThrough(t *testing.T) {
 	for _, name := range guardPassThrough {
 		if _, reachedInner := callOnBareGuard(t, name); !reachedInner {
@@ -138,57 +117,6 @@ func TestGuardWAPassesReadsThrough(t *testing.T) {
 	}
 	if _, err := g.GetJoinedGroups(context.Background()); err != nil {
 		t.Fatalf("GetJoinedGroups err = %v, want nil", err)
-	}
-}
-
-func TestGuardWALogoutIsDisabled(t *testing.T) {
-	results, reachedInner := callOnBareGuard(t, "Logout")
-	if reachedInner {
-		t.Fatal("Logout reached the WhatsApp client, want disabled")
-	}
-	if lastError(results) == nil {
-		t.Fatal("Logout err = nil, want disabled")
-	}
-}
-
-func TestGuardWAInviteLinkReadsButNeverResets(t *testing.T) {
-	jid := types.JID{User: "123", Server: types.GroupServer}
-	if _, err := (&guardWA{}).GetGroupInviteLink(context.Background(), jid, true); !errors.Is(err, errWAMutationBlocked) {
-		t.Fatalf("GetGroupInviteLink(reset=true) err = %v, want errWAMutationBlocked", err)
-	}
-	g := guardWAClient(&fakeWA{})
-	if _, err := g.GetGroupInviteLink(context.Background(), jid, false); errors.Is(err, errWAMutationBlocked) {
-		t.Fatal("GetGroupInviteLink(reset=false) blocked, want passthrough")
-	}
-}
-
-// connectRecorder records the options the guard hands to the wrapped client.
-type connectRecorder struct {
-	WAClient
-	opts []wa.ConnectOptions
-}
-
-func (c *connectRecorder) Connect(ctx context.Context, opts wa.ConnectOptions) error {
-	c.opts = append(c.opts, opts)
-	return nil
-}
-
-func (c *connectRecorder) ReconnectWithBackoff(ctx context.Context, minDelay, maxDelay time.Duration, opts wa.ConnectOptions) error {
-	c.opts = append(c.opts, opts)
-	return nil
-}
-
-func TestGuardWANeverAnnouncesOnlineOnConnect(t *testing.T) {
-	rec := &connectRecorder{}
-	g := guardWAClient(rec)
-	if err := g.Connect(context.Background(), wa.ConnectOptions{}); err != nil {
-		t.Fatal(err)
-	}
-	if err := g.ReconnectWithBackoff(context.Background(), time.Second, time.Second, wa.ConnectOptions{}); err != nil {
-		t.Fatal(err)
-	}
-	if len(rec.opts) != 2 || slices.ContainsFunc(rec.opts, func(o wa.ConnectOptions) bool { return !o.SuppressInitialAvailablePresence }) {
-		t.Fatalf("connect options = %+v, want the available presence suppressed on both", rec.opts)
 	}
 }
 

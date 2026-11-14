@@ -144,7 +144,7 @@ func TestOwnReplyRealTransport(t *testing.T) {
 	own := ownTransportSender(t, ctx, cli.Store, otherDevice)
 	base := time.Unix(1700000000, 0)
 
-	_, err = a.Sync(ctx, app.SyncOptions{Mode: app.SyncModeOnce, IdleExit: 20 * time.Millisecond, PresenceMode: app.SyncPresenceModeQuiet, AfterConnect: func(ctx context.Context) error {
+	_, err = a.Sync(ctx, app.SyncOptions{Mode: app.SyncModeOnce, IdleExit: 20 * time.Millisecond, AfterConnect: func(ctx context.Context) error {
 		seen := make(chan string, 16)
 		observer := cli.AddEventHandler(func(evt any) {
 			if msg, ok := evt.(*events.Message); ok {

@@ -67,7 +67,6 @@ func TestSyncEventHandlerEmitsLoggedOutAndSignals(t *testing.T) {
 				func(string, string) {},
 				nil,
 				nil,
-				&syncPresence{},
 				nil,
 			)
 			defer f.RemoveEventHandler(handlerID)
@@ -130,7 +129,6 @@ func TestSyncLoggedOutHumanOutputIncludesRecoveryHint(t *testing.T) {
 		func(string, string) {},
 		nil,
 		nil,
-		&syncPresence{},
 		nil,
 	)
 	defer f.RemoveEventHandler(handlerID)
@@ -162,7 +160,7 @@ func TestRunSyncFollowStopsOnLoggedOut(t *testing.T) {
 
 	done := make(chan error, 1)
 	go func() {
-		_, err := a.runSyncFollow(context.Background(), time.Second, SyncPresenceModeNormal, &messagesStored, &connectionEpoch, disconnected, loggedOut, staleReconnect)
+		_, err := a.runSyncFollow(context.Background(), time.Second, &messagesStored, &connectionEpoch, disconnected, loggedOut, staleReconnect)
 		done <- err
 	}()
 
@@ -215,7 +213,7 @@ func TestRunSyncFollowLoggedOutWinsOverPendingReconnect(t *testing.T) {
 
 				done := make(chan error, 1)
 				go func() {
-					_, err := a.runSyncFollow(context.Background(), time.Second, SyncPresenceModeNormal, &messagesStored, &connectionEpoch, disconnected, loggedOut, staleReconnect)
+					_, err := a.runSyncFollow(context.Background(), time.Second, &messagesStored, &connectionEpoch, disconnected, loggedOut, staleReconnect)
 					done <- err
 				}()
 
@@ -259,7 +257,7 @@ func TestRunSyncFollowStopsWhenLoggedOutDuringReconnect(t *testing.T) {
 	defer cancel()
 	done := make(chan error, 1)
 	go func() {
-		_, err := a.runSyncFollow(ctx, time.Hour, SyncPresenceModeNormal, &messagesStored, &connectionEpoch, disconnected, loggedOut, staleReconnect)
+		_, err := a.runSyncFollow(ctx, time.Hour, &messagesStored, &connectionEpoch, disconnected, loggedOut, staleReconnect)
 		done <- err
 	}()
 
@@ -295,7 +293,7 @@ func TestRunSyncUntilIdleStopsOnLoggedOut(t *testing.T) {
 	done := make(chan error, 1)
 	go func() {
 		// Large idleExit so the idle ticker never fires before the logout signal.
-		_, err := a.runSyncUntilIdle(context.Background(), time.Hour, time.Second, SyncPresenceModeNormal, &messagesStored, &lastEvent, disconnected, loggedOut)
+		_, err := a.runSyncUntilIdle(context.Background(), time.Hour, time.Second, &messagesStored, &lastEvent, disconnected, loggedOut)
 		done <- err
 	}()
 
@@ -333,7 +331,7 @@ func TestRunSyncUntilIdleLoggedOutWinsOverDisconnected(t *testing.T) {
 		done := make(chan error, 1)
 		go func() {
 			// Large idleExit so the idle ticker never fires before the logout signal.
-			_, err := a.runSyncUntilIdle(context.Background(), time.Hour, time.Second, SyncPresenceModeNormal, &messagesStored, &lastEvent, disconnected, loggedOut)
+			_, err := a.runSyncUntilIdle(context.Background(), time.Hour, time.Second, &messagesStored, &lastEvent, disconnected, loggedOut)
 			done <- err
 		}()
 
@@ -372,7 +370,7 @@ func TestRunSyncUntilIdleStopsWhenLoggedOutDuringReconnect(t *testing.T) {
 	defer cancel()
 	done := make(chan error, 1)
 	go func() {
-		_, err := a.runSyncUntilIdle(ctx, time.Hour, time.Hour, SyncPresenceModeNormal, &messagesStored, &lastEvent, disconnected, loggedOut)
+		_, err := a.runSyncUntilIdle(ctx, time.Hour, time.Hour, &messagesStored, &lastEvent, disconnected, loggedOut)
 		done <- err
 	}()
 
@@ -438,7 +436,6 @@ func TestRunSyncFollowCancellationRemainsSuccessful(t *testing.T) {
 	_, err := a.runSyncFollow(
 		ctx,
 		time.Second,
-		SyncPresenceModeNormal,
 		&messagesStored,
 		&connectionEpoch,
 		make(chan struct{}, 1),

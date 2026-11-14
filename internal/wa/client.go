@@ -183,16 +183,10 @@ type ConnectOptions struct {
 	OnQRCode        func(code string)
 	PairPhoneNumber string
 	OnPairCode      func(code string)
-	// SuppressInitialAvailablePresence skips the post-connect available
-	// presence update for callers that need a quiet linked-device session.
-	// The default false preserves normal WhatsApp linked-device behavior.
-	SuppressInitialAvailablePresence bool
 	// DetachSocket, when true, connects the websocket with a detached
 	// context so it is not closed when the caller's context is cancelled.
-	// This allows graceful shutdown to send a final PresenceUnavailable
-	// stanza before the client is disconnected. Only sync uses this;
-	// other commands keep the default (false) so --timeout and signal
-	// cancellation still bound the connection.
+	// Only sync uses this; other commands keep the default (false) so
+	// --timeout and signal cancellation still bound the connection.
 	DetachSocket bool
 }
 
@@ -262,11 +256,8 @@ func (c *Client) Connect(ctx context.Context, opts ConnectOptions) error {
 		dialStop()
 	}
 
+	// The device is never announced as online: no presence goes out here.
 	if authed {
-		if opts.SuppressInitialAvailablePresence {
-			return nil
-		}
-		sendInitialAvailablePresence(ctx, cli)
 		return nil
 	}
 
@@ -506,60 +497,6 @@ func (c *Client) GetGroupInfo(ctx context.Context, jid types.JID) (*types.GroupI
 		return nil, fmt.Errorf("not connected")
 	}
 	return cli.GetGroupInfo(ctx, jid)
-}
-
-// SendChatPresence sends a typing or paused indicator to a chat.
-func (c *Client) SendChatPresence(ctx context.Context, jid types.JID, state types.ChatPresence, media types.ChatPresenceMedia) error {
-	c.mu.Lock()
-	cli := c.client
-	c.mu.Unlock()
-	if cli == nil || !cli.IsConnected() {
-		return fmt.Errorf("not connected")
-	}
-	return cli.SendChatPresence(ctx, jid, state, media)
-}
-
-func sendInitialAvailablePresence(ctx context.Context, cli *whatsmeow.Client) {
-	// Whatsmeow recommends this once after connect so the server records the linked-device pushname.
-	if cli == nil || cli.Store == nil || strings.TrimSpace(cli.Store.PushName) == "" {
-		return
-	}
-	if err := cli.SendPresence(ctx, types.PresenceAvailable); err != nil {
-		fmt.Fprintf(os.Stderr, "warn: failed to send initial available presence: %v\n", err)
-	}
-}
-
-// SendPresence updates the authenticated account's global presence status.
-func (c *Client) SendPresence(ctx context.Context, presence types.Presence) error {
-	c.mu.Lock()
-	cli := c.client
-	c.mu.Unlock()
-	if cli == nil || !cli.IsConnected() {
-		return fmt.Errorf("not connected")
-	}
-	return cli.SendPresence(ctx, presence)
-}
-
-// SubscribePresence asks WhatsApp to send a user's presence (online, last
-// seen) to this connection. The subscription ends with the connection.
-func (c *Client) SubscribePresence(ctx context.Context, jid types.JID) error {
-	c.mu.Lock()
-	cli := c.client
-	c.mu.Unlock()
-	if cli == nil || !cli.IsConnected() {
-		return fmt.Errorf("not connected")
-	}
-	return cli.SubscribePresence(ctx, jid)
-}
-
-func (c *Client) Logout(ctx context.Context) error {
-	c.mu.Lock()
-	cli := c.client
-	c.mu.Unlock()
-	if cli == nil {
-		return fmt.Errorf("not initialized")
-	}
-	return cli.Logout(ctx)
 }
 
 // Reconnect loop helper.

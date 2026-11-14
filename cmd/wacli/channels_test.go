@@ -45,13 +45,6 @@ func TestParseChannelJIDRejectsNonChannel(t *testing.T) {
 	}
 }
 
-func TestChatKindFromJIDNewsletter(t *testing.T) {
-	got := chatKindFromJID(types.JID{User: "123", Server: types.NewsletterServer})
-	if got != "newsletter" {
-		t.Fatalf("chatKindFromJID = %q", got)
-	}
-}
-
 func TestPersistChannelRecordsReturnsStoreError(t *testing.T) {
 	err := persistChannelRecords(failingChannelRecordStore{}, []channelRecord{{JID: "123@newsletter", Name: "News"}})
 	if err == nil || !strings.Contains(err.Error(), "persist channel 123@newsletter") || !strings.Contains(err.Error(), "write failed") {

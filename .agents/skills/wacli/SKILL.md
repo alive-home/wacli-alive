@@ -10,7 +10,7 @@ Use this for `wacli` repo work and local WhatsApp linked-device stores. This is 
 ## Sources
 
 - Repo: this checkout
-- CLI in repo: `./dist/wacli` after `pnpm build`
+- CLI in repo: `./dist/wacli` after `bun run build`
 - Installed CLI: `wacli`
 - Default config: `~/.alive-wapp/config.yaml`
 - Default macOS store: `~/.alive-wapp`
@@ -108,7 +108,7 @@ Focused tests first, then full gate:
 ```bash
 go test ./internal/app
 go test ./internal/store
-pnpm docs:site && pnpm format:check && pnpm lint && pnpm test && pnpm build && git diff --check
+bun run check
 ```
 
 User-facing changes need docs and `CHANGELOG.md`.

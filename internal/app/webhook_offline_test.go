@@ -55,7 +55,6 @@ func offlineTestApp(t *testing.T, rec *webhookEventRecorder) (*App, *fakeWA) {
 		func(string, string) {},
 		rec.enqueue,
 		nil,
-		&syncPresence{},
 		nil,
 	)
 	return a, f

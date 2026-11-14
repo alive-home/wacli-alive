@@ -83,7 +83,7 @@ func downloadExactMedia(ctx context.Context, flags *rootFlags, chat, id, output 
 	a, lk, err := newApp(ctx, flags, true, false)
 	var result *mediaDownloadResult
 	if err != nil {
-		resp, delegated, delegateErr := tryDelegateSend(ctx, flags, err, sendDelegateRequest{Kind: mediaDownloadKind, To: chat, ID: id, RetryOnPhone: retry})
+		resp, delegated, delegateErr := tryDelegate(ctx, flags, err, delegateRequest{Kind: mediaDownloadKind, To: chat, ID: id, RetryOnPhone: retry})
 		if !delegated {
 			if lock.IsLocked(delegateErr) {
 				return nil, fmt.Errorf("%w; cached/read-only downloads use --read-only --output PATH; phone recovery needs a sync owner supporting media delegation", delegateErr)

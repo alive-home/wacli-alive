@@ -37,7 +37,7 @@ func TestMediaDownloadCacheMissOpensWritableStore(t *testing.T) {
 	// The command's process must open its first SQLite handle read-only.
 	// No session is authenticated, so reaching the auth check proves that the
 	// writable store initialized after the cache miss without connecting to WA.
-	stdout, stderr, err := runPresenceDelegateHelper(t, []string{"--store", dir, "media", "download", "--chat", chat, "--id", id, "--output", filepath.Join(dir, "output.ogg")})
+	stdout, stderr, err := runDelegateHelper(t, []string{"--store", dir, "media", "download", "--chat", chat, "--id", id, "--output", filepath.Join(dir, "output.ogg")})
 	if err == nil || !strings.Contains(stderr, "not authenticated") {
 		t.Fatalf("download error = %v stdout=%s stderr=%s, want authentication check after writable store open", err, stdout, stderr)
 	}
@@ -79,7 +79,7 @@ func TestMediaDownloadVerifiedCacheBypassesExpiredLocationAndStoreLock(t *testin
 			if readOnly {
 				args = append([]string{"--read-only"}, args...)
 			}
-			stdout, stderr, err := runPresenceDelegateHelper(t, args)
+			stdout, stderr, err := runDelegateHelper(t, args)
 			if err != nil {
 				t.Fatalf("cached exact download: %v stdout=%s stderr=%s", err, stdout, stderr)
 			}

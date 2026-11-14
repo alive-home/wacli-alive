@@ -25,14 +25,6 @@ func newChatsCmd(flags *rootFlags) *cobra.Command {
 	}
 	cmd.AddCommand(newChatsListCmd(flags))
 	cmd.AddCommand(newChatsShowCmd(flags))
-	cmd.AddCommand(newChatsArchiveCmd(flags, true))
-	cmd.AddCommand(newChatsArchiveCmd(flags, false))
-	cmd.AddCommand(newChatsPinCmd(flags, true))
-	cmd.AddCommand(newChatsPinCmd(flags, false))
-	cmd.AddCommand(newChatsMuteCmd(flags))
-	cmd.AddCommand(newChatsUnmuteCmd(flags))
-	cmd.AddCommand(newChatsMarkReadCmd(flags, true))
-	cmd.AddCommand(newChatsMarkReadCmd(flags, false))
 	cmd.AddCommand(newChatsCleanupCmd(flags))
 	return cmd
 }
