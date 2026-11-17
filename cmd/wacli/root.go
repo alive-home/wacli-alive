@@ -70,6 +70,7 @@ func newRootCmd(flags *rootFlags) *cobra.Command {
 	rootCmd.AddCommand(newSyncCmd(flags))
 	rootCmd.AddCommand(newMessagesCmd(flags))
 	rootCmd.AddCommand(newCallsCmd(flags))
+	rootCmd.AddCommand(newPushCmd(flags))
 	rootCmd.AddCommand(newPollCmd(flags))
 	rootCmd.AddCommand(newPollsCmd(flags))
 	rootCmd.AddCommand(newMediaCmd(flags))

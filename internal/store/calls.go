@@ -183,12 +183,7 @@ func (d *DB) ListCallEvents(p ListCallEventsParams) ([]CallEvent, error) {
 	if p.Limit <= 0 {
 		p.Limit = 50
 	}
-	query := `
-		SELECT rowid, chat_jid, COALESCE(chat_name,''), COALESCE(sender_jid,''), COALESCE(sender_name,''),
-		       call_id, COALESCE(msg_id,''), event_type, COALESCE(direction,''), COALESCE(media,''),
-		       COALESCE(outcome,''), COALESCE(reason,''), COALESCE(call_type,''), duration_secs,
-		       ts, COALESCE(participants,'')
-		FROM call_events
+	query := callEventSelect + `
 		WHERE 1=1`
 	var args []any
 	query, args = appendStringFilter(query, args, "chat_jid", p.ChatJID, p.ChatJIDs)
@@ -207,6 +202,17 @@ func (d *DB) ListCallEvents(p ListCallEventsParams) ([]CallEvent, error) {
 	}
 	args = append(args, p.Limit)
 
+	return d.scanCallEvents(query, args...)
+}
+
+const callEventSelect = `
+		SELECT rowid, chat_jid, COALESCE(chat_name,''), COALESCE(sender_jid,''), COALESCE(sender_name,''),
+		       call_id, COALESCE(msg_id,''), event_type, COALESCE(direction,''), COALESCE(media,''),
+		       COALESCE(outcome,''), COALESCE(reason,''), COALESCE(call_type,''), duration_secs,
+		       ts, COALESCE(participants,'')
+		FROM call_events`
+
+func (d *DB) scanCallEvents(query string, args ...any) ([]CallEvent, error) {
 	rows, err := d.sql.Query(query, args...)
 	if err != nil {
 		return nil, err

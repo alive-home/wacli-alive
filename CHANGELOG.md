@@ -10,6 +10,7 @@ This is the changelog of upstream openclaw/wacli, kept for reference. Entries ab
 - No telemetry, update checks, CI, release publishing, or vulnerability-service lookups. The `docs` command (it opened upstream's site) is gone, the generated docs site loads nothing from the network, and `sync --send-spacing` and `sync --presence-mode` are removed with the code they steered.
 - Build scripts run on Bun instead of Node.js and pnpm; there is nothing to install.
 - Default store is `~/.alive-wapp` (`~/.local/state/alive-wapp` on Linux) instead of upstream's `~/.wacli`, which is no longer read. Move an existing store there by hand, with no `wacli` running.
+- New `push` command: posts the stored messages, their changes and the call events to a URL you pass, signed with a key from a file. It only posts; see `docs/push.md`.
 - whatsmeow is ahead of upstream 0.26.0 (2026-11-10): a contact, mute, pin or archive update whose checksum does not match but whose signature is valid is applied instead of stopping that sync, and a contact removed on the phone loses its name here too.
 
 ## Unreleased

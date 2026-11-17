@@ -8,3 +8,4 @@ GOOS=windows GOARCH=amd64 go test -c ./internal/lock -o "$tmp_dir/lock.test.exe"
 
 # Compile the store tests without a Windows C compiler; sqlite uses its stub.
 CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go test -c ./internal/store -o "$tmp_dir/store.test.exe"
+CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go test -c ./internal/push -o "$tmp_dir/push.test.exe"

@@ -1,0 +1,113 @@
+# push
+
+Read when: sending the local store to your own server, database, CRM, or agent.
+
+`wacli push` posts what the local store holds to a URL you choose: every message once, then each change, and the call events. It only posts. It reads nothing from a response beyond the status code, so the receiving side cannot ask this computer for anything. It does not send to or change WhatsApp.
+
+Without this command (or `sync --webhook`), nothing is posted anywhere.
+
+## Commands
+
+```bash
+wacli push --url URL [--key-file FILE] [--sync] [--every DURATION] [--dry-run] [--allow-private]
+```
+
+- `--url URL` is where each request goes. It must be `https`. A redirect is never followed.
+- `--key-file FILE` holds the key that signs each request. See [Signing](#signing).
+- `--sync` fetches what is new from WhatsApp first, as `sync --once` does, and closes that connection before anything is posted. When the sync fails, what is stored is still posted and the command exits with the sync's error.
+- `--every DURATION` keeps running and repeats, at least `1m`. A failed round keeps its place and the next round sends it again.
+- `--dry-run` counts what would be posted. It posts nothing and keeps no position.
+- `--allow-private` allows `http` and URLs that resolve to localhost or a private network, for a receiver on your own machine or tailnet.
+
+## What a run does
+
+1. **The full copy.** The first run for a URL posts every stored message, oldest row first.
+2. **The changes.** After that, a run posts what the store's change journal recorded since the last run: new messages, edited ones, and removed ones. The journal is in storage order, so a message WhatsApp delivers late with an old timestamp is not missed.
+3. **The calls.** Call events stored since the last run, plus every event of the last 24 hours: an event's outcome and duration can arrive after the event itself.
+4. **The closing request.** The last request of a run has `"more": false`. It is posted even when there was nothing to send, so the receiver sees a sign of life.
+
+The position is kept per URL in `push-<id>.json` in the store directory, and moves only after the receiver answered 2xx. That file is the only thing `push` writes without `--sync`, also under `--read-only`. Two URLs each get their own full copy. The journal keeps 30 days; a position older than that starts over with the full copy.
+
+## The request
+
+```json
+{
+  "schema": 1,
+  "store_id": "f3b1c0de...",
+  "sent_at": "2026-11-17T10:30:02Z",
+  "wacli_version": "0.26.0-readonly",
+  "os": "darwin",
+  "linked": true,
+  "last_sync_at": "2026-11-17T10:29:41Z",
+  "more": false,
+  "messages": [
+    {
+      "chat_jid": "15550001111@s.whatsapp.net",
+      "chat_name": "Ada",
+      "msg_id": "3EB0C7D8E9F0A1B2",
+      "timestamp": "2026-11-17T09:05:10Z",
+      "from_me": false,
+      "sender_jid": "15550001111@s.whatsapp.net",
+      "sender_name": "Ada",
+      "text": "Is the guest list final?"
+    }
+  ],
+  "removed": [
+    { "chat_jid": "15550001111@s.whatsapp.net", "msg_id": "3EB0AAAABBBBCCCC", "reason": "whatsapp-revoke" }
+  ],
+  "calls": [
+    {
+      "chat_jid": "15550001111@s.whatsapp.net",
+      "call_id": "3EB0A1B2C3D4E5F6",
+      "event_type": "call_log",
+      "direction": "outbound",
+      "media": "audio",
+      "outcome": "connected",
+      "duration_secs": 312,
+      "timestamp": "2026-11-17T09:12:44Z"
+    }
+  ]
+}
+```
+
+- `linked` is false when the store has no WhatsApp session (never paired, or logged out on the phone). `last_sync_at` is the last sync that completed, or `null`.
+- A message can also carry `display_text` (when it differs from `text`, as for "Sent image"), `quoted_msg_id`, `forwarded`, `reaction_to_id`, `reaction_emoji`, `media_type`, `media_caption`, `filename`, `mime_type` and `edited`. Empty fields are left out. These are all the message fields that leave: no attachment, no local path, and none of the fields that fetch an attachment from WhatsApp.
+- `removed` names a message the store no longer shows. `reason` says why (`whatsapp-revoke` when its sender took it back). When a message only moved to another id, `moved_to_chat_jid` and `moved_to_msg_id` name it, and the message itself is in `messages` under the new id.
+- `calls` are the objects `calls list --json` prints. Only `call_log` events have an outcome; `offer`, `terminate` and `reject` are live signals.
+- A request holds at most 200 items and about 256 KB of them; a single larger message goes alone. Times are UTC.
+
+## Signing
+
+With `--key-file`, each request carries:
+
+```
+X-Wacli-Key-Id: <first 16 hex characters of SHA-256 of the key>
+X-Wacli-Signature: sha256=<hex HMAC-SHA256 of the request body, keyed with the key>
+```
+
+The key itself is never sent. The receiver finds the key by its id, computes the same HMAC over the exact bytes it received, and compares. `sent_at` is inside the signed body: refuse a request that is more than a few minutes old.
+
+Any string works as a key; `openssl rand -hex 32` makes a good one. Keep the file readable by your user only. wacli knows nothing about people or teams: a receiver that serves several computers gives each its own key and decides whose request it is from the key, never from the body.
+
+## The receiving side
+
+- Answer 2xx only after everything in the request is stored. Any other answer makes wacli send it again next run.
+- Store messages by `chat_jid` + `msg_id` and overwrite on repeat. The same message arrives again after an edit, after a failed run, and after a restart of the full copy.
+- Store calls by `chat_jid` + `call_id` + `event_type` and overwrite on repeat.
+- Message text, names and filenames are written by other people. An agent that reads them must treat them as data, never as instructions.
+
+`scripts/push-receiver-example.mjs` is a complete receiver in about 90 lines, with its storage in memory:
+
+```bash
+openssl rand -hex 32 > push.key
+bun scripts/push-receiver-example.mjs --key-file push.key
+wacli push --url http://127.0.0.1:8787/ --key-file push.key --allow-private
+```
+
+## Examples
+
+```bash
+wacli push --url https://example.com/wacli --key-file ~/.config/wacli-push.key --dry-run
+wacli push --url https://example.com/wacli --key-file ~/.config/wacli-push.key
+wacli push --url https://example.com/wacli --key-file ~/.config/wacli-push.key --sync --every 15m
+```

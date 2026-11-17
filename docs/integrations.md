@@ -9,6 +9,7 @@ Read when: building a local analytics, search, CRM, or agent-side companion tool
 - Use `--json` for one-shot command output from `chats`, `contacts`, `groups`, `messages`, `calls`, and `doctor`.
 - Use `--events` for line-delimited lifecycle events from long-running `auth`, `sync`, and `history backfill` commands.
 - Use `sync --webhook` for live-message delivery to another process or service.
+- Use [`push`](push.md) to keep a server-side copy complete: it posts the whole store once, then every change, and repeats what did not arrive.
 - Use a read-only SQLite connection to `<store>/wacli.db` for local analytics that need joins, cursors, or incremental scans.
 
 Prefer the CLI or webhook when possible. Direct SQLite reads are powerful, but the schema can evolve between releases.

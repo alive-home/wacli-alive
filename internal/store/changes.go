@@ -2,12 +2,17 @@ package store
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
 )
 
 const changeRetentionSeconds = 30 * 24 * 60 * 60
+
+// ErrCheckpointExpired is what MessageChanges returns for a checkpoint older
+// than the journal still holds.
+var ErrCheckpointExpired = errors.New("expired checkpoint")
 
 const changeCleanupSQL = `DELETE FROM message_changes WHERE recorded_at <= CAST(strftime('%s','now') AS INTEGER)-2592000;
  DELETE FROM message_changes WHERE sequence IN (
@@ -213,7 +218,7 @@ func (d *DB) MessageChanges(since string, checkpoint bool, limit int) (ChangesPa
 		}
 	}
 	if token.Position < floor {
-		return out, fmt.Errorf("expired checkpoint: obtain a fresh --checkpoint before a full export, then replay changes after processing that export; restart an invalidated export")
+		return out, fmt.Errorf("%w: obtain a fresh --checkpoint before a full export, then replay changes after processing that export; restart an invalidated export", ErrCheckpointExpired)
 	}
 	boundary := high
 	if token.Boundary != nil {

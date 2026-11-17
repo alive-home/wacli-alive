@@ -28,7 +28,7 @@ These commands are not in the binary. Running one prints that it is not availabl
 
 Only the WhatsApp connection itself: the linked-device session and media downloads from WhatsApp's servers. There is no telemetry and no update check.
 
-One opt-in exception: `wacli sync --webhook URL` posts each new message to the URL you pass. Without that flag, nothing is posted anywhere.
+Two opt-in exceptions, both to a URL you pass: `wacli sync --webhook URL` posts each new message while it syncs, and `wacli push --url URL` posts the stored messages and call events. Without one of those, nothing is posted anywhere.
 
 Your messages and session keys stay in the store directory on your disk, readable only by your user.
 
@@ -97,6 +97,7 @@ While `sync --follow` runs it holds the store lock. `media download` and `contac
 | [`auth`](docs/auth.md), [`accounts`](docs/accounts.md) | Pair a linked device and keep separate stores per account. |
 | [`sync`](docs/sync.md), [`history`](docs/history.md) | Mirror new events and request older per-chat history. |
 | [`messages`](docs/messages.md), [`calls`](docs/calls.md) | Search, read, and export local records. |
+| [`push`](docs/push.md) | Post stored messages and calls to a URL you choose. |
 | [`media`](docs/media.md) | Download media from synced messages. |
 | [`contacts`](docs/contacts.md), [`chats`](docs/chats.md) | Find people and chats; keep local aliases and tags. |
 | [`groups`](docs/groups.md), [`channels`](docs/channels.md) | Read groups, participants, and channels. |

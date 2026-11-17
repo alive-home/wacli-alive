@@ -29,6 +29,7 @@ Read when: you need the user-facing command map, global flags, store model, or l
 - [sync](sync.md) - sync messages, contacts, groups, channels, and optional media.
 - [messages](messages.md) - list, search, show, and contextualize stored messages.
 - [calls](calls.md) - list stored WhatsApp call events.
+- [push](push.md) - post stored messages and calls to a URL you choose.
 - [media](media.md) - download media attached to stored messages.
 - [contacts](contacts.md) - search contacts and manage local aliases/tags.
 - [contacts import-system](contacts-import-system.md) - import macOS Contacts names into local contact metadata.

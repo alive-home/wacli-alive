@@ -87,7 +87,8 @@
 - `internal/pathutil/`: sanitises StorePath; rejects `?` and `#` to prevent URI injection.
 - `internal/pairpage/`: the local pairing page of `wacli auth --open` (`pair.html` + `pair.js` in the store directory). It is read from disk and must load nothing from the network; `TestPageLoadsNothingFromTheNetwork` holds that. What it tells customers must stay true of the build.
 - `internal/sqliteutil/`: sqlite file helpers.
-- `internal/safehttp/`: HTTP client that only connects to public addresses; the sync webhook posts through it.
+- `internal/safehttp/`: HTTP client that only connects to public addresses; the sync webhook and `push` post through it.
+- `internal/push/`: the `push` command's work: the full copy, the change journal, the call events, request splitting and signing. It posts to the URL its caller passes and reads only the status code of a response. `request.go` holds the fixed list of message fields that leave; `TestOnlyTheListedMessageFieldsLeave` holds it.
 - Tests sit next to the code they cover (`*_test.go`).
 
 ## Key Architectural Facts
