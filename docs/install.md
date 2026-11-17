@@ -38,7 +38,7 @@ Download [wacli.exe](https://github.com/alive-home/wacli-alive/releases/latest/d
 
 It never checks for updates. To remove it: turn off sending on the page, delete the folder `%LOCALAPPDATA%\wacli` and the store directory (`%USERPROFILE%\.alive-wapp`), and log the device out in WhatsApp on your phone, under Linked devices.
 
-Built by hand on a Windows runner and attached to the release; pairing with a phone has not been tried on Windows.
+Built by hand and attached to the release, so it can be a build behind the Mac app. Opening it with a double click and pairing with a phone have not been tried on Windows.
 
 ## Build from source
 
