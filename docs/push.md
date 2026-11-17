@@ -21,12 +21,12 @@ wacli push --url URL [--key-file FILE] [--sync] [--every DURATION] [--dry-run] [
 
 ## What a run does
 
-1. **The full copy.** The first run for a URL posts every stored message, oldest row first.
+1. **The full copy.** The first run for a URL posts every stored message, oldest row first. A message that was deleted or taken back goes as a removal, without its text.
 2. **The changes.** After that, a run posts what the store's change journal recorded since the last run: new messages, edited ones, and removed ones. The journal is in storage order, so a message WhatsApp delivers late with an old timestamp is not missed.
 3. **The calls.** Call events stored since the last run, plus every event of the last 24 hours: an event's outcome and duration can arrive after the event itself.
 4. **The closing request.** The last request of a run has `"more": false`. It is posted even when there was nothing to send, so the receiver sees a sign of life.
 
-The position is kept per URL in `push-<id>.json` in the store directory, and moves only after the receiver answered 2xx. That file is the only thing `push` writes without `--sync`, also under `--read-only`. Two URLs each get their own full copy. The journal keeps 30 days; a position older than that starts over with the full copy.
+The position is kept per URL in `push-<id>.json` in the store directory, and moves only after the receiver answered 2xx. That file is the only thing `push` writes without `--sync`, also under `--read-only`. Two URLs each get their own full copy. The journal keeps 30 days; a position older than that starts over with the full copy, which also tells what was removed in between.
 
 ## The request
 
@@ -93,6 +93,7 @@ Any string works as a key; `openssl rand -hex 32` makes a good one. Keep the fil
 
 - Answer 2xx only after everything in the request is stored. Any other answer makes wacli send it again next run.
 - Store messages by `chat_jid` + `msg_id` and overwrite on repeat. The same message arrives again after an edit, after a failed run, and after a restart of the full copy.
+- A `removed` entry can name a message you never stored: it was gone before the first run. Ignore it.
 - Store calls by `chat_jid` + `call_id` + `event_type` and overwrite on repeat.
 - Message text, names and filenames are written by other people. An agent that reads them must treat them as data, never as instructions.
 
@@ -102,6 +103,46 @@ Any string works as a key; `openssl rand -hex 32` makes a good one. Keep the fil
 openssl rand -hex 32 > push.key
 bun scripts/push-receiver-example.mjs --key-file push.key
 wacli push --url http://127.0.0.1:8787/ --key-file push.key --allow-private
+```
+
+## Running it on a schedule
+
+`--every` repeats for as long as the terminal stays open. To keep a computer sending without one, let the system start a run every 15 minutes. A run that is still going is not started a second time.
+
+macOS: save this as `~/Library/LaunchAgents/wacli-push.plist`. Write every path in full; launchd does not expand `~`.
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>wacli-push</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/you/.local/bin/wacli</string>
+    <string>push</string>
+    <string>--url</string><string>https://example.com/wacli</string>
+    <string>--key-file</string><string>/Users/you/.config/wacli-push.key</string>
+    <string>--sync</string>
+  </array>
+  <key>RunAtLoad</key><true/>
+  <key>StartInterval</key><integer>900</integer>
+  <key>StandardOutPath</key><string>/Users/you/Library/Logs/wacli-push.log</string>
+  <key>StandardErrorPath</key><string>/Users/you/Library/Logs/wacli-push.log</string>
+</dict>
+</plist>
+```
+
+```bash
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/wacli-push.plist   # runs now, every 15 minutes, and after each login
+launchctl bootout gui/$(id -u)/wacli-push                                  # stop
+```
+
+Windows: one task in Task Scheduler, for the signed-in user.
+
+```bat
+schtasks /Create /TN wacli-push /SC MINUTE /MO 15 /TR "C:\Tools\wacli.exe push --url https://example.com/wacli --key-file C:\Users\you\wacli-push.key --sync"
+schtasks /Delete /TN wacli-push /F
 ```
 
 ## Examples

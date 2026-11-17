@@ -5,13 +5,14 @@ import "time"
 // MessagesAfterRow returns the stored messages with a row id above after,
 // oldest row first, and the row id of the last one. Row order is storage
 // order, so a reader that pages by it keeps its place while a sync adds
-// messages. Deleted messages are left out.
+// messages. Deleted and revoked messages are in it too: a reader that copied
+// them earlier has to hear that they are gone.
 func (d *DB) MessagesAfterRow(after int64, limit int) ([]Message, int64, error) {
 	msgs, err := d.scanMessages(`SELECT `+d.messageSelectColumns("")+`
 		FROM messages m
 		LEFT JOIN chats c ON c.jid = m.chat_jid
 		LEFT JOIN starred s ON s.chat_jid = m.chat_jid AND s.msg_id = m.msg_id
-		WHERE m.deleted_at IS NULL AND m.rowid > ?
+		WHERE m.rowid > ?
 		ORDER BY m.rowid LIMIT ?`, after, limit)
 	if err != nil || len(msgs) == 0 {
 		return nil, after, err

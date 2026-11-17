@@ -108,7 +108,7 @@ func (r *run) messages(ctx context.Context) error {
 		}
 		if len(msgs) == 0 {
 			r.pos.CopyDone = true
-		} else if err := r.send(ctx, batch{messages: r.wire(msgs)}, false); err != nil {
+		} else if err := r.send(ctx, r.current(msgs), false); err != nil {
 			return err
 		}
 		r.pos.Row = last
@@ -151,29 +151,54 @@ func (r *run) changed(changes []store.MessageChange) (batch, error) {
 		last[k] = c
 	}
 	for _, c := range changes {
+		// A chat that moves to another id keeps its message ids.
+		if c.NewChatJID != "" && c.NewMsgID == "" {
+			c.NewMsgID = c.MsgID
+		}
 		touch(key{c.ChatJID, c.MsgID}, c)
 		if c.NewMsgID != "" {
 			touch(key{c.NewChatJID, c.NewMsgID}, store.MessageChange{Operation: "upsert"})
 		}
 	}
-	var b batch
+	var gone []Removed
 	var found []store.Message
 	for _, k := range order {
 		m, err := r.db.GetMessage(k.chat, k.id)
 		switch {
 		case errors.Is(err, sql.ErrNoRows):
 			c := last[k]
-			b.removed = append(b.removed, Removed{ChatJID: k.chat, MsgID: k.id, Reason: c.Reason, MovedToChatJID: c.NewChatJID, MovedToMsgID: c.NewMsgID})
+			gone = append(gone, Removed{ChatJID: k.chat, MsgID: k.id, Reason: c.Reason, MovedToChatJID: c.NewChatJID, MovedToMsgID: c.NewMsgID})
 		case err != nil:
 			return batch{}, err
-		case m.DeletedAt != nil || m.Revoked:
-			b.removed = append(b.removed, Removed{ChatJID: k.chat, MsgID: k.id, Reason: m.DeletionReason})
 		default:
 			found = append(found, m)
 		}
 	}
-	b.messages = r.wire(found)
+	b := r.current(found)
+	b.removed = append(gone, b.removed...)
 	return b, nil
+}
+
+// current sorts stored rows into what goes out: a message as it is now, or
+// only its removal when it was deleted or revoked. A removal carries no text.
+func (r *run) current(rows []store.Message) batch {
+	var b batch
+	var shown []store.Message
+	for _, m := range rows {
+		if m.DeletedAt != nil || m.Revoked {
+			b.removed = append(b.removed, Removed{ChatJID: m.ChatJID, MsgID: m.MsgID, Reason: m.DeletionReason})
+		} else {
+			shown = append(shown, m)
+		}
+	}
+	if r.opts.ResolveNames != nil {
+		shown = r.opts.ResolveNames(shown)
+	}
+	b.messages = make([]Message, len(shown))
+	for i, m := range shown {
+		b.messages[i] = wireMessage(m)
+	}
+	return b
 }
 
 func (r *run) calls(ctx context.Context) error {
@@ -189,27 +214,16 @@ func (r *run) calls(ctx context.Context) error {
 	return r.savePosition()
 }
 
-func (r *run) wire(msgs []store.Message) []Message {
-	if r.opts.ResolveNames != nil {
-		msgs = r.opts.ResolveNames(msgs)
-	}
-	out := make([]Message, len(msgs))
-	for i, m := range msgs {
-		out[i] = wireMessage(m)
-	}
-	return out
-}
-
 // send posts a batch in as many requests as its size needs. closing marks the
 // last request of the run and is sent even when the batch is empty.
 func (r *run) send(ctx context.Context, b batch, closing bool) error {
-	bodies, err := r.post.bodies(b, closing)
+	requests, err := r.post.requests(b, closing)
 	if err != nil {
 		return err
 	}
-	for _, body := range bodies {
+	for _, req := range requests {
 		if !r.opts.DryRun {
-			if err := r.post.post(ctx, body); err != nil {
+			if err := r.post.post(ctx, req); err != nil {
 				return err
 			}
 		}

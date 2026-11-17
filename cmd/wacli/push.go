@@ -61,17 +61,28 @@ func newPushCmd(flags *rootFlags) *cobra.Command {
 			defer stop()
 			for {
 				res, err := pushRound(ctx, flags, p, key)
-				if p.every == 0 || ctx.Err() != nil {
+				if p.every == 0 {
 					if err != nil {
 						return err
 					}
 					return writePushResult(flags, p, res)
 				}
+				// Stopping a long run is not a failure; a round cut short keeps its place.
+				if ctx.Err() != nil {
+					return nil
+				}
 				// A round that fails keeps its place; the next one sends it again.
+				// The rounds of a long run are told apart by their time.
+				at := time.Now().Format("2006-01-02 15:04")
 				if err != nil {
-					fmt.Fprintf(os.Stderr, "push failed: %v; next try in %s\n", err, p.every)
-				} else if err := writePushResult(flags, p, res); err != nil {
-					return err
+					fmt.Fprintf(os.Stderr, "%s push failed: %v; next try in %s\n", at, err, p.every)
+				} else {
+					if !flags.asJSON {
+						fmt.Fprint(os.Stdout, at, " ")
+					}
+					if err := writePushResult(flags, p, res); err != nil {
+						return err
+					}
 				}
 				select {
 				case <-ctx.Done():

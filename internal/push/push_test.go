@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"slices"
 	"strings"
@@ -28,6 +29,7 @@ const (
 type received struct {
 	Schema     int               `json:"schema"`
 	StoreID    string            `json:"store_id"`
+	SentAt     time.Time         `json:"sent_at"`
 	Linked     bool              `json:"linked"`
 	More       bool              `json:"more"`
 	Messages   []Message         `json:"messages"`
@@ -133,6 +135,16 @@ func messageIDs(reqs []received) []string {
 	return ids
 }
 
+func removedIDs(reqs []received) []string {
+	var ids []string
+	for _, r := range reqs {
+		for _, m := range r.Removed {
+			ids = append(ids, m.MsgID)
+		}
+	}
+	return ids
+}
+
 func TestFirstRunCopiesEverythingOnceAndSignsIt(t *testing.T) {
 	f := newFixture(t)
 	f.message("a", "one")
@@ -151,6 +163,9 @@ func TestFirstRunCopiesEverythingOnceAndSignsIt(t *testing.T) {
 		}
 		if r.Schema != 1 || r.StoreID == "" || !r.Linked {
 			t.Fatalf("request %d: envelope = schema %d, store %q, linked %v", i, r.Schema, r.StoreID, r.Linked)
+		}
+		if age := time.Since(r.SentAt); age < -time.Minute || age > time.Minute {
+			t.Fatalf("request %d: sent_at = %v, want the moment it left", i, r.SentAt)
 		}
 		if closing := i == len(reqs)-1; r.More == closing {
 			t.Fatalf("request %d of %d has more=%v", i+1, len(reqs), r.More)
@@ -250,8 +265,12 @@ func TestRequestsAreSplitByCountAndSize(t *testing.T) {
 func TestExpiredJournalStartsOverFromTheFullCopy(t *testing.T) {
 	f := newFixture(t)
 	f.message("a", "one")
+	f.message("gone", "taken back")
 	f.run()
 	f.message("b", "two")
+	if err := f.db.MarkMessageRevoked(chatJID, "gone"); err != nil {
+		t.Fatalf("MarkMessageRevoked: %v", err)
+	}
 
 	// The journal drops entries after its retention; do that by hand.
 	raw, err := sql.Open("sqlite3", filepath.Join(f.dir, "wacli.db"))
@@ -266,6 +285,10 @@ func TestExpiredJournalStartsOverFromTheFullCopy(t *testing.T) {
 	res, reqs := f.run()
 	if got := messageIDs(reqs); !res.Restarted || !slices.Equal(got, []string{"a", "b"}) {
 		t.Fatalf("restarted=%v, sent %v; want a restart that sends [a b]", res.Restarted, got)
+	}
+	// The journal no longer says so, but the receiver still holds its text.
+	if got := removedIDs(reqs); !slices.Equal(got, []string{"gone"}) {
+		t.Fatalf("the restart told the removal of %v, want [gone]", got)
 	}
 	if res, reqs = f.run(); res.Restarted || len(messageIDs(reqs)) != 0 {
 		t.Fatalf("the run after the restart sent %v again", messageIDs(reqs))
@@ -313,21 +336,84 @@ func TestOnlyTheListedMessageFieldsLeave(t *testing.T) {
 	if strings.Contains(string(reqs[0].raw), "secret-") {
 		t.Fatal("the request holds a field that fetches the attachment")
 	}
-	var body struct {
-		Messages []map[string]any `json:"messages"`
-	}
-	if err := json.Unmarshal(reqs[0].raw, &body); err != nil || len(body.Messages) != 1 {
-		t.Fatalf("messages = %v (%v)", body.Messages, err)
-	}
-	allowed := []string{
+	// The list in docs/push.md. A field added to Message is a field that leaves.
+	listed := []string{
 		"chat_jid", "chat_name", "msg_id", "timestamp", "from_me", "sender_jid", "sender_name", "text",
 		"display_text", "quoted_msg_id", "forwarded", "reaction_to_id", "reaction_emoji",
 		"media_type", "media_caption", "filename", "mime_type", "edited",
 	}
-	for field := range body.Messages[0] {
-		if !slices.Contains(allowed, field) {
-			t.Fatalf("message field %q is not on the list of fields that may leave", field)
+	var fields []string
+	for field := range reflect.TypeFor[Message]().Fields() {
+		name, _, _ := strings.Cut(field.Tag.Get("json"), ",")
+		fields = append(fields, name)
+	}
+	if !slices.Equal(fields, listed) {
+		t.Fatalf("message fields = %v, want exactly the listed %v", fields, listed)
+	}
+}
+
+// A message that was taken back before the first run goes as a removal, and
+// its text never leaves.
+func TestFullCopyTellsRemovalsWithoutTheirText(t *testing.T) {
+	f := newFixture(t)
+	f.message("a", "one")
+	f.message("b", "taken-back-text")
+	if err := f.db.MarkMessageRevoked(chatJID, "b"); err != nil {
+		t.Fatalf("MarkMessageRevoked: %v", err)
+	}
+
+	res, reqs := f.run()
+	if !slices.Equal(messageIDs(reqs), []string{"a"}) || !slices.Equal(removedIDs(reqs), []string{"b"}) || res.Removed != 1 {
+		t.Fatalf("sent %v, removed %v", messageIDs(reqs), removedIDs(reqs))
+	}
+	for _, r := range reqs {
+		if strings.Contains(string(r.raw), "taken-back-text") {
+			t.Fatal("the text of a revoked message left")
 		}
+	}
+}
+
+// WhatsApp swaps a hidden id for the phone number: the chat moves, and each
+// message in it has to arrive under its new chat.
+func TestAChatThatMovesKeepsItsMessages(t *testing.T) {
+	const hidden, phone = "123456789@lid", "31611111111@s.whatsapp.net"
+	f := newFixture(t)
+	if err := f.db.UpsertChat(hidden, "dm", "Bob", time.Now()); err != nil {
+		t.Fatalf("UpsertChat: %v", err)
+	}
+	if err := f.db.UpsertMessage(store.UpsertMessageParams{
+		ChatJID: hidden, MsgID: "m1", SenderJID: hidden, Timestamp: time.Now(), Text: "hello",
+	}); err != nil {
+		t.Fatalf("UpsertMessage: %v", err)
+	}
+	f.run()
+
+	if err := f.db.MigrateLIDToPN(hidden, phone); err != nil {
+		t.Fatalf("MigrateLIDToPN: %v", err)
+	}
+	_, reqs := f.run()
+	var moved []Removed
+	var arrived []Message
+	for _, r := range reqs {
+		moved = append(moved, r.Removed...)
+		arrived = append(arrived, r.Messages...)
+	}
+	if len(moved) != 1 || moved[0].ChatJID != hidden || moved[0].MovedToChatJID != phone || moved[0].MovedToMsgID != "m1" {
+		t.Fatalf("removed = %+v, want m1 moved from the hidden chat to the phone chat", moved)
+	}
+	if len(arrived) != 1 || arrived[0].ChatJID != phone || arrived[0].MsgID != "m1" || arrived[0].Text != "hello" {
+		t.Fatalf("messages = %+v, want m1 under the phone chat", arrived)
+	}
+}
+
+// A failure says why, and never repeats the URL: its path can hold a token.
+func TestFailedRequestNamesTheCauseNotTheURL(t *testing.T) {
+	f := newFixture(t)
+	f.rc.srv.Close()
+	f.opts.URL = f.rc.srv.URL + "/secret-token"
+	_, err := Run(context.Background(), f.db, f.opts)
+	if err == nil || !strings.Contains(err.Error(), "refused") || strings.Contains(err.Error(), "secret-token") {
+		t.Fatalf("err = %v, want the cause without the URL", err)
 	}
 }
 

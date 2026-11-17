@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -112,7 +113,11 @@ func newPoster(opts Options) (*poster, error) {
 	}
 	client := safehttp.NewClient()
 	if opts.AllowPrivate {
-		client = &http.Client{}
+		// As above, the content goes where the URL says and nowhere else:
+		// a proxy from the environment is not used.
+		transport := http.DefaultTransport.(*http.Transport).Clone()
+		transport.Proxy = nil
+		client = &http.Client{Transport: transport}
 	}
 	client.Timeout = 30 * time.Second
 	// A redirect is never followed: the content goes to the configured host only.
@@ -120,10 +125,10 @@ func newPoster(opts Options) (*poster, error) {
 	return &poster{client: client, url: opts.URL, key: opts.Key, version: opts.Version, linked: opts.Linked}, nil
 }
 
-// bodies splits a batch into request bodies of at most maxItems items and
-// about maxItemBytes of items. Only the body of the run's closing request has
-// "more": false, and that one is made even when the batch is empty.
-func (p *poster) bodies(b batch, closing bool) ([][]byte, error) {
+// requests splits a batch into requests of at most maxItems items and about
+// maxItemBytes of items. Only the run's closing request has "more": false, and
+// that one is made even when the batch is empty.
+func (p *poster) requests(b batch, closing bool) ([]envelope, error) {
 	type item struct {
 		list int // 0 messages, 1 removed, 2 calls
 		v    any
@@ -139,18 +144,13 @@ func (p *poster) bodies(b batch, closing bool) ([][]byte, error) {
 		items = append(items, item{2, c})
 	}
 
-	var out [][]byte
+	var out []envelope
 	env := p.newEnvelope()
 	count, size := 0, 0
-	flush := func(more bool) error {
+	flush := func(more bool) {
 		env.More = more
-		body, err := json.Marshal(env)
-		if err != nil {
-			return err
-		}
-		out = append(out, body)
+		out = append(out, env)
 		env, count, size = p.newEnvelope(), 0, 0
-		return nil
 	}
 	for _, it := range items {
 		raw, err := json.Marshal(it.v)
@@ -158,9 +158,7 @@ func (p *poster) bodies(b batch, closing bool) ([][]byte, error) {
 			return nil, err
 		}
 		if count > 0 && (count == maxItems || size+len(raw) > maxItemBytes) {
-			if err := flush(true); err != nil {
-				return nil, err
-			}
+			flush(true)
 		}
 		lists := [...]*[]json.RawMessage{&env.Messages, &env.Removed, &env.Calls}
 		*lists[it.list] = append(*lists[it.list], raw)
@@ -168,22 +166,27 @@ func (p *poster) bodies(b batch, closing bool) ([][]byte, error) {
 		size += len(raw)
 	}
 	if count > 0 || closing {
-		if err := flush(!closing); err != nil {
-			return nil, err
-		}
+		flush(!closing)
 	}
 	return out, nil
 }
 
 func (p *poster) newEnvelope() envelope {
 	return envelope{
-		Schema: schemaVersion, StoreID: p.storeID, SentAt: time.Now().UTC().Truncate(time.Second),
+		Schema: schemaVersion, StoreID: p.storeID,
 		WacliVersion: p.version, OS: runtime.GOOS, Linked: p.linked, LastSyncAt: p.lastSync,
 		Messages: []json.RawMessage{}, Removed: []json.RawMessage{}, Calls: []json.RawMessage{},
 	}
 }
 
-func (p *poster) post(ctx context.Context, body []byte) error {
+// post sends one request. sent_at is the moment it leaves: the receiver
+// refuses a request that is minutes old.
+func (p *poster) post(ctx context.Context, env envelope) error {
+	env.SentAt = time.Now().UTC().Truncate(time.Second)
+	body, err := json.Marshal(env)
+	if err != nil {
+		return err
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, p.url, bytes.NewReader(body))
 	if err != nil {
 		return fmt.Errorf("push: create request: invalid URL")
@@ -196,8 +199,13 @@ func (p *poster) post(ctx context.Context, body []byte) error {
 	}
 	resp, err := p.client.Do(req)
 	if err != nil {
-		// The URL can hold a token in its path or query: name the host only.
-		return fmt.Errorf("push: request to %s failed", req.URL.Host)
+		// The URL can hold a token in its path or query: name the host and
+		// the cause, never the URL the client's own error carries.
+		var withURL *url.Error
+		if errors.As(err, &withURL) {
+			err = withURL.Err
+		}
+		return fmt.Errorf("push: request to %s failed: %w", req.URL.Host, err)
 	}
 	defer resp.Body.Close()
 	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<20))
