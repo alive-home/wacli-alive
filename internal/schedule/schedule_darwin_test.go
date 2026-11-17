@@ -21,9 +21,12 @@ func TestPlistEscapesArgumentsAndSetsTheInterval(t *testing.T) {
 	}
 }
 
-func TestInstallRefusesAnAppThatRunsFromItsDownload(t *testing.T) {
-	err := Install(Job{Label: "wacli-test-never-installed", Program: "/private/var/folders/x/T/AppTranslocation/1234/d/wacli.app/Contents/Helpers/wacli"})
+func TestAnAppThatRunsFromItsDownloadIsRefused(t *testing.T) {
+	err := check(Job{Program: "/private/var/folders/x/T/AppTranslocation/1234/d/wacli.app/Contents/Helpers/wacli"})
 	if err == nil || !strings.Contains(err.Error(), "move it to Applications") {
 		t.Fatalf("err = %v", err)
+	}
+	if err := check(Job{Program: "/Applications/wacli.app/Contents/Helpers/wacli"}); err != nil {
+		t.Fatalf("an installed app was refused: %v", err)
 	}
 }

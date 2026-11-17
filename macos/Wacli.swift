@@ -22,12 +22,17 @@ enum Wacli {
         process.standardError = stderr
         process.standardInput = stdin
         try process.run()
-        if let input { stdin.fileHandleForWriting.write(Data(input.utf8)) }
-        try stdin.fileHandleForWriting.close()
 
-        // Each pipe is read on its own thread, so a full one cannot stall the program.
-        async let output = Task.detached { stdout.fileHandleForReading.readDataToEndOfFile() }.value
-        async let errors = Task.detached { stderr.fileHandleForReading.readDataToEndOfFile() }.value
+        // Each pipe has its own thread, so a full one cannot stall the program.
+        // A program that ended before it read its input is not an error here:
+        // its exit status and message say what happened.
+        let thread = DispatchQueue.global(qos: .userInitiated)
+        thread.async {
+            if let input { try? stdin.fileHandleForWriting.write(contentsOf: Data(input.utf8)) }
+            try? stdin.fileHandleForWriting.close()
+        }
+        async let output = read(stdout, on: thread)
+        async let errors = read(stderr, on: thread)
         let (out, err) = await (output, errors)
         process.waitUntilExit()
 
@@ -40,6 +45,12 @@ enum Wacli {
         let last = String(decoding: err, as: UTF8.self).split(separator: "\n").last.map(String.init) ?? ""
         let message = (try? decoder.decode(Envelope<Bool>.self, from: Data(last.utf8)))?.error
         throw Failure(message: message ?? (last.isEmpty ? "wacli exited with status \(process.terminationStatus)" : last))
+    }
+
+    private static func read(_ pipe: Pipe, on thread: DispatchQueue) async -> Data {
+        await withCheckedContinuation { done in
+            thread.async { done.resume(returning: pipe.fileHandleForReading.readDataToEndOfFile()) }
+        }
     }
 }
 
@@ -70,6 +81,15 @@ final class Linking: ObservableObject {
         let events = Pipe()
         process.standardError = events
 
+        do {
+            try process.run()
+        } catch {
+            running = false
+            failure = error.localizedDescription
+            return
+        }
+        self.process = process
+
         Task.detached { [weak self] in
             var lastError: String?
             do {
@@ -98,16 +118,6 @@ final class Linking: ObservableObject {
                 self.running = false
                 if failed { self.failure = message ?? texts.stopped }
             }
-        }
-
-        do {
-            try process.run()
-            self.process = process
-        } catch {
-            // Nothing will write to the pipe: end the reader.
-            try? events.fileHandleForWriting.close()
-            running = false
-            failure = error.localizedDescription
         }
     }
 

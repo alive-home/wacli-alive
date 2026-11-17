@@ -10,7 +10,7 @@ Without this command (or `sync --webhook`), nothing is posted anywhere.
 
 ```bash
 wacli push --url URL [--key-file FILE] [--sync] [--every DURATION] [--dry-run] [--allow-private]
-wacli push install --url URL [--key-file FILE | --key-stdin] [--allow-private]
+wacli push install (--url URL [--key-file FILE] | --stdin) [--allow-private]
 wacli push status
 wacli push uninstall
 ```
@@ -120,11 +120,13 @@ wacli push uninstall
 ```
 
 - `install` first posts one request without content and with `"more": true`. A receiver that does not answer 2xx (a wrong key, a wrong address) is reported at once and nothing is installed.
-- Then the system starts a round now, every 15 minutes, and after each sign-in: a launchd agent named `wacli-push` on macOS, a task named `wacli-push` in Task Scheduler on Windows, both for the signed-in user. A round fetches what is new from WhatsApp, as `--sync` does, and pushes. A round that is still going is not started a second time.
-- The URL and the path of the key file are kept in `scheduled-push.json` in the store directory, owner-only. The scheduled command is `wacli --store DIR push --installed`: the URL is not in it, because a job's arguments are readable by every program on the computer. With `--key-stdin` the key is read from standard input and kept beside it, as `scheduled-push.key`.
+- Then the system starts a round now and every 15 minutes while you are signed in: a launchd agent on macOS (which also starts a round at each sign-in), a task in Task Scheduler on Windows (on battery too, and caught up after sleep). Both belong to the signed-in user and are named `wacli-push-` plus eight characters that stand for the store directory. A round fetches what is new from WhatsApp, as `--sync` does, and pushes. A round that is still going is not started a second time.
+- A push is installed whole or not at all: when the system does not take the job, the saved URL and key are removed again, an earlier install for this store included.
+- The URL and the path of the key file are kept in `scheduled-push.json` in the store directory, owner-only. The scheduled command is `wacli --store DIR push --installed`: the URL is not in it, because a program's arguments are readable by every program on the computer. For the same reason a program that starts `install` can hand both over standard input: `--stdin` reads `{"url": "...", "key": "..."}` and keeps the key beside the settings, as `scheduled-push.key`.
 - `status` names the receiver's host and how the last round ended. `--json` gives `installed`, `scheduled` (the system still holds the job), `host`, `every_seconds` and `last_run`.
-- `uninstall` removes the job, the saved URL and a key that `--key-stdin` stored. The position stays, so installing again for the same URL sends what is new.
-- One schedule per user. The job runs the program from where it was when `install` ran: after moving it, run `install` again.
+- `uninstall` removes the job, the saved URL and a key that `--stdin` stored. The position stays, so installing again for the same URL sends what is new.
+- One schedule per store directory: a named account (`--account`) or another `--store` gets its own, and `status` and `uninstall` speak for the store they are run with. The job runs the program by the path it was started with: after moving it, run `install` again.
+- On Windows the task runs `wacli.exe`, a console program, so a console window can show for the length of a round.
 - On Linux there is no scheduler to hand it to; start `wacli push --url URL --key-file FILE --sync` from cron or a systemd timer.
 
 The [Mac app](install.md#mac-app) does the same from its Settings window.

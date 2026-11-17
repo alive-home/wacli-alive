@@ -10,6 +10,7 @@
 // ASC_PRIVATE_KEY (the .p8 text). Nothing is uploaded anywhere but to Apple's
 // notary, and nothing is published.
 import { execFile } from "node:child_process"
+import { rmSync } from "node:fs"
 import { chmod, cp, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -25,6 +26,11 @@ const dmg = join(out, "wacli.dmg")
 const IDENTITY = "Developer ID Application: Alive AI B.V. (N5CF4VM7JS)"
 const MINIMUM_MACOS = "13.0"
 const dev = process.argv.includes("--dev")
+
+// The notary's key leaves the environment before any program is started, so
+// the compilers and tools below never get it; notarytool reads it from a file.
+const notary = { keyId: process.env.ASC_KEY_ID, issuer: process.env.ASC_ISSUER_ID, key: process.env.ASC_PRIVATE_KEY }
+for (const name of ["ASC_KEY_ID", "ASC_ISSUER_ID", "ASC_PRIVATE_KEY"]) delete process.env[name]
 
 async function run(command, args, options = {}) {
   try {
@@ -93,27 +99,29 @@ if (dev) {
   process.exit(0)
 }
 
-for (const name of ["ASC_KEY_ID", "ASC_ISSUER_ID", "ASC_PRIVATE_KEY"]) {
-  if (!process.env[name]) throw new Error(`${name} is not set: the notary needs an App Store Connect key.`)
+if (!notary.keyId || !notary.issuer || !notary.key) {
+  throw new Error("ASC_KEY_ID, ASC_ISSUER_ID and ASC_PRIVATE_KEY must be set: the notary needs an App Store Connect key.")
 }
 const secrets = await mkdtemp(join(tmpdir(), "wacli-notary-"))
 const keyFile = join(secrets, "key.p8")
-await writeFile(keyFile, process.env.ASC_PRIVATE_KEY, { mode: 0o600 })
+// A build that is stopped while the notary works still takes the key file along.
+for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"]) {
+  process.on(signal, () => {
+    rmSync(secrets, { recursive: true, force: true })
+    process.exit(1)
+  })
+}
+await writeFile(keyFile, notary.key, { mode: 0o600 })
 await chmod(keyFile, 0o600)
+const notaryKey = ["--key", keyFile, "--key-id", notary.keyId, "--issuer", notary.issuer]
 
 /** Sends one file to Apple's notary and waits for its answer. */
 async function notarize(file) {
   const answer = JSON.parse(
-    await run("xcrun", [
-      "notarytool", "submit", file, "--wait", "--output-format", "json",
-      "--key", keyFile, "--key-id", process.env.ASC_KEY_ID, "--issuer", process.env.ASC_ISSUER_ID,
-    ]),
+    await run("xcrun", ["notarytool", "submit", file, "--wait", "--output-format", "json", ...notaryKey]),
   )
   if (answer.status !== "Accepted") {
-    const log = await run("xcrun", [
-      "notarytool", "log", answer.id,
-      "--key", keyFile, "--key-id", process.env.ASC_KEY_ID, "--issuer", process.env.ASC_ISSUER_ID,
-    ]).catch(error => error.message)
+    const log = await run("xcrun", ["notarytool", "log", answer.id, ...notaryKey]).catch(error => error.message)
     throw new Error(`The notary answered ${answer.status} for ${file}:\n${log}`)
   }
 }

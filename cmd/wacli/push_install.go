@@ -3,6 +3,8 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -10,6 +12,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/openclaw/wacli/internal/fsutil"
@@ -20,12 +23,11 @@ import (
 )
 
 const (
-	pushJobLabel = "wacli-push"
 	pushJobEvery = 15 * time.Minute
 	// Both live in the store directory, owner-only like the rest of it.
 	pushSettingsFile = "scheduled-push.json"
 	pushLastRunFile  = "scheduled-push-last.json"
-	// The key `push install --key-stdin` was handed.
+	// The key `push install --stdin` was handed.
 	pushKeyFile = "scheduled-push.key"
 )
 
@@ -55,35 +57,25 @@ var pushScheduler = struct {
 
 func newPushInstallCmd(flags *rootFlags) *cobra.Command {
 	var s pushSettings
-	var keyStdin bool
+	var fromStdin bool
 	cmd := &cobra.Command{
 		Use:   "install",
 		Short: "Have this computer push every 15 minutes",
 		Long: "install checks that the receiver takes the URL and key, saves them in the store directory,\n" +
-			"and has the system start `push --installed` now, every 15 minutes, and after each sign-in.",
+			"and has the system start `push --installed` now and every 15 minutes.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if s.URL == "" {
-				return fmt.Errorf("--url is required")
-			}
 			if err := flags.requireWritable(); err != nil {
-				return err
-			}
-			// A system without a scheduler says so before anything is checked or saved.
-			if _, err := pushScheduler.installed(pushJobLabel); err != nil {
 				return err
 			}
 			var key []byte
 			switch {
-			case keyStdin && s.KeyFile != "":
-				return fmt.Errorf("--key-stdin and --key-file cannot be combined")
-			case keyStdin:
-				data, err := io.ReadAll(io.LimitReader(cmd.InOrStdin(), 4096))
-				if err != nil {
-					return fmt.Errorf("read the key: %w", err)
-				}
-				if key = bytes.TrimSpace(data); len(key) == 0 {
-					return fmt.Errorf("--key-stdin got no key")
+			case fromStdin && (s.URL != "" || s.KeyFile != ""):
+				return fmt.Errorf("--stdin carries the URL and the key and cannot be combined with --url or --key-file")
+			case fromStdin:
+				var err error
+				if s.URL, key, err = readPushInstallInput(cmd.InOrStdin()); err != nil {
+					return err
 				}
 			case s.KeyFile != "":
 				var err error
@@ -94,65 +86,131 @@ func newPushInstallCmd(flags *rootFlags) *cobra.Command {
 					return err
 				}
 			}
-			program, err := os.Executable()
-			if err == nil {
-				program, err = filepath.EvalSymlinks(program)
+			if s.URL == "" {
+				return fmt.Errorf("--url is required")
 			}
+			storeDir, err := resolveStoreDir(flags)
+			if err != nil {
+				return err
+			}
+			label := pushJobLabel(storeDir)
+			// A system without a scheduler says so before anything is checked or saved.
+			if _, err := pushScheduler.installed(label); err != nil {
+				return err
+			}
+			// The path as this program was started: a link that is moved to a
+			// newer build takes the job along.
+			program, err := os.Executable()
 			if err != nil {
 				return fmt.Errorf("find this program: %w", err)
 			}
 			ctx, stop := signalContextWithEvents(out.NewEventWriter(os.Stderr, flags.events))
 			defer stop()
-			storeDir, err := checkPushReceiver(ctx, flags, s, key)
+			if err := checkPushReceiver(ctx, flags, s, key); err != nil {
+				return err
+			}
+			// From here a failure takes back what was written, an earlier
+			// install included: a push is installed whole or not at all.
+			err = savePushSettings(storeDir, s, key, fromStdin)
+			if err == nil {
+				err = pushScheduler.install(schedule.Job{
+					Label: label, Program: program, Args: []string{"--store", storeDir, "push", "--installed"}, Every: pushJobEvery,
+				})
+			}
 			if err != nil {
-				return err
-			}
-			if keyStdin {
-				s.KeyFile = filepath.Join(storeDir, pushKeyFile)
-				if err := fsutil.WritePrivateFileAtomic(s.KeyFile, append(key, '\n')); err != nil {
-					return err
-				}
-			}
-			data, err := json.Marshal(s)
-			if err != nil {
-				return err
-			}
-			if err := fsutil.WritePrivateFileAtomic(filepath.Join(storeDir, pushSettingsFile), data); err != nil {
-				return err
-			}
-			job := schedule.Job{Label: pushJobLabel, Program: program, Args: []string{"--store", storeDir, "push", "--installed"}, Every: pushJobEvery}
-			if err := pushScheduler.install(job); err != nil {
-				return err
+				_ = removeInstalledPush(storeDir, label)
+				return fmt.Errorf("nothing is installed: %w", err)
 			}
 			return writePushStatus(flags, storeDir)
 		},
 	}
 	cmd.Flags().StringVar(&s.URL, "url", "", "URL to POST to (https)")
 	cmd.Flags().StringVar(&s.KeyFile, "key-file", "", "file holding the key that signs each request (X-Wacli-Signature)")
-	cmd.Flags().BoolVar(&keyStdin, "key-stdin", false, "read that key from standard input and keep it in the store directory")
+	cmd.Flags().BoolVar(&fromStdin, "stdin", false, `read the URL and the key from standard input as {"url": "...", "key": "..."}; the key is kept in the store directory`)
 	cmd.Flags().BoolVar(&s.AllowPrivate, "allow-private", false, "allow http and URLs that resolve to localhost or private networks")
 	return cmd
 }
 
+// pushJobLabel names the job of one store, so two stores each keep their own
+// schedule and `status` and `uninstall` speak for the store they are asked about.
+func pushJobLabel(storeDir string) string {
+	sum := sha256.Sum256([]byte(storeDir))
+	return "wacli-push-" + hex.EncodeToString(sum[:4])
+}
+
+// readPushInstallInput reads what `--stdin` carries: a program that starts
+// install hands over the URL and the key without putting them in arguments,
+// which every program on the computer can read.
+func readPushInstallInput(r io.Reader) (string, []byte, error) {
+	var in struct {
+		URL string `json:"url"`
+		Key string `json:"key"`
+	}
+	data, err := io.ReadAll(io.LimitReader(r, 64<<10))
+	if err != nil {
+		return "", nil, fmt.Errorf("read --stdin: %w", err)
+	}
+	if err := json.Unmarshal(data, &in); err != nil {
+		return "", nil, fmt.Errorf(`read --stdin: want {"url": "...", "key": "..."}: %w`, err)
+	}
+	key := bytes.TrimSpace([]byte(in.Key))
+	if len(key) > 4096 {
+		return "", nil, fmt.Errorf("the key is longer than 4096 bytes")
+	}
+	return strings.TrimSpace(in.URL), key, nil
+}
+
+// savePushSettings writes what the scheduled rounds need. A key that came
+// over standard input is kept beside the settings; a key kept by an earlier
+// install goes when this one does not use it.
+func savePushSettings(storeDir string, s pushSettings, key []byte, keepKey bool) error {
+	stored := filepath.Join(storeDir, pushKeyFile)
+	if keepKey && len(key) > 0 {
+		s.KeyFile = stored
+		if err := fsutil.WritePrivateFileAtomic(stored, append(key, '\n')); err != nil {
+			return err
+		}
+	} else if err := os.Remove(stored); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	data, err := json.Marshal(s)
+	if err != nil {
+		return err
+	}
+	return fsutil.WritePrivateFileAtomic(filepath.Join(storeDir, pushSettingsFile), data)
+}
+
+// removeInstalledPush takes the job out of the system's scheduler and removes
+// the saved URL, the last result and a key install stored.
+func removeInstalledPush(storeDir, label string) error {
+	err := pushScheduler.uninstall(label)
+	for _, name := range []string{pushSettingsFile, pushLastRunFile, pushKeyFile} {
+		if removeErr := os.Remove(filepath.Join(storeDir, name)); removeErr != nil && !errors.Is(removeErr, os.ErrNotExist) && err == nil {
+			err = removeErr
+		}
+	}
+	return err
+}
+
 // checkPushReceiver posts the one request without content that proves the
-// receiver takes this URL and key, and returns the store directory.
-func checkPushReceiver(ctx context.Context, flags *rootFlags, s pushSettings, key []byte) (string, error) {
+// receiver takes this URL and key.
+func checkPushReceiver(ctx context.Context, flags *rootFlags, s pushSettings, key []byte) error {
 	a, lk, err := newApp(ctx, flags, false, false)
 	if err != nil {
-		return "", err
+		return err
 	}
 	defer closeApp(a, lk)
 	linked, _, err := readOnlyAuthStatus(a.StoreDir())
 	if err != nil {
-		return "", err
+		return err
 	}
 	err = push.Check(ctx, a.DB(), push.Options{
 		URL: s.URL, Key: key, AllowPrivate: s.AllowPrivate, StoreDir: a.StoreDir(), Version: a.Version(), Linked: linked,
 	})
 	if err != nil {
-		return "", fmt.Errorf("nothing was installed: %w", err)
+		return fmt.Errorf("nothing was installed: %w", err)
 	}
-	return a.StoreDir(), nil
+	return nil
 }
 
 func newPushUninstallCmd(flags *rootFlags) *cobra.Command {
@@ -168,13 +226,8 @@ func newPushUninstallCmd(flags *rootFlags) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if err := pushScheduler.uninstall(pushJobLabel); err != nil {
+			if err := removeInstalledPush(storeDir, pushJobLabel(storeDir)); err != nil {
 				return err
-			}
-			for _, name := range []string{pushSettingsFile, pushLastRunFile, pushKeyFile} {
-				if err := os.Remove(filepath.Join(storeDir, name)); err != nil && !errors.Is(err, os.ErrNotExist) {
-					return err
-				}
 			}
 			return writePushStatus(flags, storeDir)
 		},
@@ -284,7 +337,7 @@ func writePushStatus(flags *rootFlags, storeDir string) error {
 	if err != nil {
 		return err
 	}
-	scheduled, err := pushScheduler.installed(pushJobLabel)
+	scheduled, err := pushScheduler.installed(pushJobLabel(storeDir))
 	if err != nil && !errors.Is(err, schedule.ErrUnsupported) {
 		return err
 	}
@@ -311,7 +364,7 @@ func writePushStatus(flags *rootFlags, storeDir string) error {
 	}
 	switch {
 	case s == nil:
-		fmt.Fprintln(os.Stdout, "No scheduled push is installed. Nothing is sent from this computer.")
+		fmt.Fprintln(os.Stdout, "No scheduled push is installed for this store.")
 		return nil
 	case !scheduled:
 		fmt.Fprintf(os.Stdout, "A push to %s is saved, but the system no longer starts it. Run `wacli push install` again.\n", host)

@@ -26,6 +26,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     let linking = Linking()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // Writing to a wacli that has already ended is an error to handle, not a reason to quit.
+        signal(SIGPIPE, SIG_IGN)
         // The scheduled push and the assistant's commands name this program
         // by its path, and an app opened from its disk image or its download
         // runs from a path that is gone after a restart.

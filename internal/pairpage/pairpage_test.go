@@ -20,11 +20,11 @@ var sampleCode = "2@" + strings.Repeat("Qk9HVVNSRUY", 12) + "," + strings.Repeat
 
 func readPage(t *testing.T, dir string) (html, js string) {
 	t.Helper()
-	h, err := os.ReadFile(filepath.Join(dir, htmlName))
+	h, err := os.ReadFile(filepath.Join(dir, dirName, htmlName))
 	if err != nil {
 		t.Fatal(err)
 	}
-	j, err := os.ReadFile(filepath.Join(dir, jsName))
+	j, err := os.ReadFile(filepath.Join(dir, dirName, jsName))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -152,7 +152,7 @@ func TestPageFilesArePrivate(t *testing.T) {
 	}
 	defer p.Finish(0, nil)
 	for _, name := range []string{htmlName, jsName} {
-		info, err := os.Stat(filepath.Join(dir, name))
+		info, err := os.Stat(filepath.Join(dir, dirName, name))
 		if err != nil {
 			t.Fatal(err)
 		}

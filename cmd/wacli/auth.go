@@ -329,7 +329,8 @@ func pairPageProgram(exe string, lookPath func(string) (string, error)) string {
 	if found, err := lookPath("wacli"); err == nil && sameFile(found, exe) {
 		return "wacli"
 	}
-	return fmt.Sprintf("%q", exe)
+	// Plain quotes: %q would double the backslashes of a Windows path.
+	return `"` + exe + `"`
 }
 
 // pairPageStoreFlag is what the commands in the page's prompt need to reach

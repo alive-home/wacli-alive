@@ -9,15 +9,15 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 // Install writes the job as a launchd agent and starts it. A job with the
-// same label is replaced.
+// same label is replaced. When launchd does not take it, nothing is left that
+// would start it at the next sign-in.
 func Install(job Job) error {
-	// An app opened straight from its disk image runs from a path that is
-	// gone after a restart.
-	if strings.Contains(job.Program, "/AppTranslocation/") {
-		return errors.New("this app runs from its download; move it to Applications, open it there and try again")
+	if err := check(job); err != nil {
+		return err
 	}
 	path, err := plistPath(job.Label)
 	if err != nil {
@@ -29,11 +29,37 @@ func Install(job Job) error {
 	if err := os.WriteFile(path, plist(job), 0o644); err != nil {
 		return err
 	}
-	_ = exec.Command("launchctl", "bootout", target(job.Label)).Run()
+	bootout(job.Label)
 	if out, err := exec.Command("launchctl", "bootstrap", domain(), path).CombinedOutput(); err != nil {
+		_ = os.Remove(path)
 		return fmt.Errorf("launchctl bootstrap: %s", firstLine(out, err))
 	}
 	return nil
+}
+
+// check refuses a program launchd could not start later. An app opened
+// straight from its disk image or its download runs from a path that is gone
+// after a restart.
+func check(job Job) error {
+	if strings.Contains(job.Program, "/AppTranslocation/") {
+		return errors.New("this app runs from its download; move it to Applications, open it there and try again")
+	}
+	return nil
+}
+
+// bootout takes the job out of launchd and waits until it is gone: launchd
+// answers before a running job has ended, and refuses to load a label it
+// still holds.
+func bootout(label string) {
+	if exec.Command("launchctl", "bootout", target(label)).Run() != nil {
+		return
+	}
+	for range 50 {
+		if loaded, _ := Installed(label); !loaded {
+			return
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
 }
 
 // Uninstall stops the job and removes it. A job that is not there is not an error.
@@ -42,7 +68,7 @@ func Uninstall(label string) error {
 	if err != nil {
 		return err
 	}
-	_ = exec.Command("launchctl", "bootout", target(label)).Run()
+	bootout(label)
 	if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}

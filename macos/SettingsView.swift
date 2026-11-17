@@ -32,6 +32,9 @@ struct SettingsView: View {
     @State private var key = ""
     @State private var working = false
     @State private var failure: String?
+    /// Counts the changes made here, so a status read that started before
+    /// one cannot put the old state back.
+    @State private var changes = 0
 
     var body: some View {
         Form {
@@ -71,10 +74,7 @@ struct SettingsView: View {
                             Button(texts.turnOff) { change(["push", "uninstall"]) }
                                 .accessibilityIdentifier("push-off")
                         } else {
-                            Button(working ? texts.checking : texts.turnOn) {
-                                change(["push", "install", "--url", address.trimmingCharacters(in: .whitespaces)]
-                                    + (key.isEmpty ? [] : ["--key-stdin"]), input: key.isEmpty ? nil : key)
-                            }
+                            Button(working ? texts.checking : texts.turnOn) { turnOn() }
                             .keyboardShortcut(.defaultAction)
                             .disabled(address.trimmingCharacters(in: .whitespaces).isEmpty)
                             .accessibilityIdentifier("push-on")
@@ -114,8 +114,10 @@ struct SettingsView: View {
     }
 
     private func refresh() async {
+        let before = changes
         do {
-            status = try await Wacli.json(PushStatus.self, ["push", "status"])
+            let read = try await Wacli.json(PushStatus.self, ["push", "status"])
+            if before == changes, !working { status = read }
         } catch let error as Wacli.Failure {
             failure = error.message
         } catch {
@@ -123,9 +125,18 @@ struct SettingsView: View {
         }
     }
 
+    /// The address and the key go over standard input: a program's arguments
+    /// can be read by every other program on the Mac.
+    private func turnOn() {
+        let input = ["url": address.trimmingCharacters(in: .whitespaces), "key": key]
+        guard let json = try? JSONEncoder().encode(input) else { return }
+        change(["push", "install", "--stdin"], input: String(decoding: json, as: UTF8.self))
+    }
+
     private func change(_ arguments: [String], input: String? = nil) {
         working = true
         failure = nil
+        changes += 1
         Task {
             do {
                 status = try await Wacli.json(PushStatus.self, arguments, input: input)

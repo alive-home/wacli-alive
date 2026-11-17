@@ -11,8 +11,9 @@ import (
 // ErrUnsupported is returned where this package has no scheduler to use.
 var ErrUnsupported = errors.New("no scheduler for this operating system; start the command from cron or a systemd timer")
 
-// Job is one program the system starts at once, then every Every, and again
-// after each sign-in. A run that is still going is not started a second time.
+// Job is one program the system starts at once and then every Every, for as
+// long as the user is signed in. A run that is still going is not started a
+// second time.
 type Job struct {
 	Label   string // the job's name in the system's scheduler
 	Program string // full path of the program

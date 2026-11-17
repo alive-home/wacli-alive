@@ -1,10 +1,11 @@
 // Package pairpage shows WhatsApp pairing on a local web page, for people who
 // would rather not read a QR code from a terminal.
 //
-// The page is two files in the store directory: pair.html, which a browser
-// opens from disk, and pair.js, which the open page loads again every moment
-// to follow the pairing. Nothing is served and the page loads nothing from the
-// network.
+// The page is two files in the folder pair of the store directory: pair.html,
+// which a browser opens from disk, and pair.js, which the open page loads
+// again every moment to follow the pairing. Nothing is served and the page
+// loads nothing from the network. The folder holds nothing else, so a program
+// that shows the page can be given that folder alone and not the store.
 package pairpage
 
 import (
@@ -13,6 +14,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"html/template"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
@@ -28,6 +30,7 @@ import (
 const SourceURL = "https://github.com/alive-home/wacli-alive"
 
 const (
+	dirName  = "pair"
 	htmlName = "pair.html"
 	jsName   = "pair.js"
 
@@ -91,7 +94,7 @@ func New(storeDir, command, lang string) *Page {
 }
 
 // Path is the file a browser opens.
-func (p *Page) Path() string { return filepath.Join(p.storeDir, htmlName) }
+func (p *Page) Path() string { return filepath.Join(p.storeDir, dirName, htmlName) }
 
 // Start writes the page before any code exists and keeps it marked as alive
 // until Finish.
@@ -178,8 +181,11 @@ func (p *Page) set(change func(*view)) error {
 	if err != nil {
 		return err
 	}
+	if err := os.MkdirAll(filepath.Join(p.storeDir, dirName), 0o700); err != nil {
+		return fmt.Errorf("write pairing page: %w", err)
+	}
 	// The script first: a page that is opened now must find it.
-	if err := fsutil.WritePrivateFileAtomic(filepath.Join(p.storeDir, jsName), []byte("pairState("+string(state)+");\n")); err != nil {
+	if err := fsutil.WritePrivateFileAtomic(filepath.Join(p.storeDir, dirName, jsName), []byte("pairState("+string(state)+");\n")); err != nil {
 		return fmt.Errorf("write pairing page: %w", err)
 	}
 	if err := fsutil.WritePrivateFileAtomic(p.Path(), html); err != nil {

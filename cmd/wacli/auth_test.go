@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"database/sql"
-	"fmt"
 	"math"
 	"os"
 	"os/exec"
@@ -408,7 +407,7 @@ func TestPairPagePromptNamesAProgramThatIsNotOnThePath(t *testing.T) {
 		t.Fatalf("on the PATH: %q", got)
 	}
 	for name, lookPath := range map[string]func(string) (string, error){"another wacli": found(other), "none": missing} {
-		if got := pairPageProgram(exe, lookPath); got != fmt.Sprintf("%q", exe) {
+		if got := pairPageProgram(exe, lookPath); got != `"`+exe+`"` {
 			t.Fatalf("%s on the PATH: %q", name, got)
 		}
 	}
@@ -416,8 +415,13 @@ func TestPairPagePromptNamesAProgramThatIsNotOnThePath(t *testing.T) {
 
 // --page writes the same page as --open and has the same limits.
 func TestValidateAuthOptionsPage(t *testing.T) {
-	if _, err := validateAuthOptions(&rootFlags{}, authOptions{pageOnly: true, phone: "+15551234567"}); err == nil {
-		t.Fatal("--page with --phone was accepted")
+	for _, opts := range []authOptions{
+		{pageOnly: true, phone: "+15551234567"},
+		{pageOnly: true, qrFormat: "text"},
+	} {
+		if _, err := validateAuthOptions(&rootFlags{}, opts); err == nil {
+			t.Fatalf("validateAuthOptions(%+v) was accepted", opts)
+		}
 	}
 }
 

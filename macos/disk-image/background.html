@@ -2,15 +2,16 @@
 <!-- The disk image window's background, 660×400 pt. scripts/draw-disk-image.mjs
      draws it at 1× and 2× into background.tiff. Finder draws the icons and
      their labels on top, 128 pt: wacli at (170, 180), Applications at
-     (490, 180), the points layout.py gives. -->
+     (490, 180), the points layout.py gives. The text sits close under the
+     labels: a Finder that shows its tab bar and path bar leaves about 336 pt. -->
 <html><head><meta charset="utf-8"><style>
   html,body{margin:0;width:660px;height:400px;overflow:hidden}
   body{background:radial-gradient(ellipse 520px 320px at 330px 170px,#ffffff,#efeff1);
     font-family:-apple-system,system-ui,sans-serif;position:relative}
   svg{position:absolute;inset:0}
-  .line{position:absolute;left:0;right:0;top:318px;text-align:center;
+  .line{position:absolute;left:0;right:0;top:288px;text-align:center;
     font-size:15px;font-weight:600;letter-spacing:.005em;color:#1b1b1e}
-  .hint{position:absolute;left:0;right:0;top:342px;text-align:center;
+  .hint{position:absolute;left:0;right:0;top:311px;text-align:center;
     font-size:12px;color:rgba(27,27,30,.54)}
 </style></head><body>
 <svg width="660" height="400" viewBox="0 0 660 400">

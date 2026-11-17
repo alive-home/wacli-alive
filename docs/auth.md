@@ -36,7 +36,7 @@ wacli --account work auth status
 
 ## Pairing page
 
-`wacli auth --open` writes `pair.html` and `pair.js` to the store directory (owner-only, like the rest of the store) and opens `pair.html` in the default browser. Nothing is served: the browser reads the files from disk, and the page loads nothing from the network.
+`wacli auth --open` writes `pair.html` and `pair.js` to the folder `pair` in the store directory (owner-only, like the rest of the store) and opens `pair.html` in the default browser. Nothing is served: the browser reads the files from disk, and the page loads nothing from the network.
 
 - The page shows the QR code with the four steps to scan it, replaces the code when WhatsApp rotates it, and says when WhatsApp is linked, how many messages were fetched, or that pairing stopped. It is in English, or in Dutch with `--lang nl`; the program that starts pairing picks the language of the person who will scan.
 - Below that it tells the person what the link can read, how it works, where the data is stored, and where the source can be read. It ends with a text they can copy into their AI assistant, which explains that this build only reads and lists the commands to start with.

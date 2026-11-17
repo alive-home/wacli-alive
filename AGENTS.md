@@ -85,11 +85,11 @@
 - `internal/out/`: JSON + table output helpers; all human text goes through here.
 - `internal/fsutil/`: enforces 0700/0600 owner-only permissions on store files.
 - `internal/pathutil/`: sanitises StorePath; rejects `?` and `#` to prevent URI injection.
-- `internal/pairpage/`: the local pairing page of `wacli auth --open` (`pair.html` + `pair.js` in the store directory). It is read from disk and must load nothing from the network; `TestPageLoadsNothingFromTheNetwork` holds that. What it tells customers must stay true of the build.
+- `internal/pairpage/`: the local pairing page of `wacli auth --open` (`pair.html` + `pair.js` in the folder `pair` of the store directory; the Mac app's web view may read that folder only). It is read from disk and must load nothing from the network; `TestPageLoadsNothingFromTheNetwork` holds that. What it tells customers must stay true of the build.
 - `internal/sqliteutil/`: sqlite file helpers.
 - `internal/safehttp/`: HTTP client that only connects to public addresses; the sync webhook and `push` post through it.
 - `internal/push/`: the `push` command's work: the full copy, the change journal, the call events, request splitting and signing. It posts to the URL its caller passes and reads only the status code of a response. `request.go` holds the fixed list of message fields that leave; `TestOnlyTheListedMessageFieldsLeave` holds it.
-- `internal/schedule/`: has the system start a program every few minutes for the signed-in user (launchd agent, Task Scheduler task). `push install` is its one caller; the job it writes carries no URL.
+- `internal/schedule/`: has the system start a program every few minutes for the signed-in user (launchd agent, Task Scheduler task). `push install` is its one caller; the job it writes carries no URL, and each store directory has its own job.
 - `macos/`: the Mac app around the program, in Swift. It holds no logic of its own: its window shows the page `auth --page` writes and its Settings call `push install|status|uninstall`. `scripts/pack-mac.mjs` builds, signs and notarizes it and makes the disk image; it uploads to Apple's notary only and publishes nothing. `macos/disk-image/` is the image's drawn window (`bun run draw:disk-image` after changing it).
 - Tests sit next to the code they cover (`*_test.go`).
 

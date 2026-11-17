@@ -11,7 +11,7 @@ Do not install `wacli` with Homebrew, `go install`, or the release archives of o
 
 ## Mac app
 
-Download [wacli.dmg](https://github.com/alive-home/wacli-alive/releases/latest/download/wacli.dmg), open it, drag wacli to Applications, and open it from there. It runs on macOS 13 or newer, on Apple Silicon and Intel Macs. The app is signed with a Developer ID and notarized by Apple, so macOS opens it without a warning.
+Download [wacli.dmg](https://github.com/alive-home/wacli-alive/releases/latest/download/wacli.dmg), open it, drag wacli to Applications, and open it from there. It runs on macOS 13 or newer, on Apple Silicon and Intel Macs. The app is signed with a Developer ID and notarized by Apple, so macOS opens it after its usual one-time question about an app from the internet.
 
 - **The window links WhatsApp.** It shows the code to scan with your phone, then that WhatsApp is linked and how many messages came in. It is the [pairing page](auth.md#pairing-page) of `wacli auth`, in English or Dutch after the Mac's language. Opening the app again later fetches what is new.
 - **Settings (⌘,) can send a copy to a server.** Fill in the address and the key of your receiver and turn it on: the app checks that the receiver takes them, then the Mac pushes every 15 minutes. It is [`push install`](push.md#running-it-on-a-schedule); Settings shows how the last run ended. Off by default.

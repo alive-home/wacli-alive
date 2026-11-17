@@ -77,8 +77,9 @@ private struct WindowLook: NSViewRepresentable {
     func updateNSView(_ view: View, context: Context) {}
 }
 
-/// Shows the pairing page from the store directory. The page loads nothing
-/// from the network; a link in it opens in the browser.
+/// Shows the pairing page. It may read the page's own folder and nothing
+/// else of the store; the page loads nothing from the network, and a link in
+/// it opens in the browser.
 private struct PairingPage: NSViewRepresentable {
     let url: URL
 
