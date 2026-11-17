@@ -45,6 +45,14 @@ type staleReconnectRequest struct {
 }
 
 func (a *App) addSyncEventHandler(ctx context.Context, opts SyncOptions, messagesStored, lastEvent *atomic.Int64, disconnected chan<- struct{}, loggedOut chan<- struct{}, staleReconnect chan<- staleReconnectRequest, enqueueMedia func(string, string), enqueueWebhook func(syncWebhookEvent), limits *syncStorageLimits, mediaQ *mediaQueue) (uint32, *sync.Map) {
+	handle, appStateRecoveries := a.newSyncEventHandler(ctx, opts, messagesStored, lastEvent, disconnected, loggedOut, staleReconnect, enqueueMedia, enqueueWebhook, limits, mediaQ)
+	return a.wa.AddEventHandler(handle), appStateRecoveries
+}
+
+// newSyncEventHandler is the one place that stores what WhatsApp delivers. Sync
+// registers it with its queues and channels; keepBacklog registers it bare for
+// every other command that connects.
+func (a *App) newSyncEventHandler(ctx context.Context, opts SyncOptions, messagesStored, lastEvent *atomic.Int64, disconnected chan<- struct{}, loggedOut chan<- struct{}, staleReconnect chan<- staleReconnectRequest, enqueueMedia func(string, string), enqueueWebhook func(syncWebhookEvent), limits *syncStorageLimits, mediaQ *mediaQueue) (func(any), *sync.Map) {
 	var panicCount atomic.Int64
 	var appStateRecoveries sync.Map
 	if enqueueWebhook == nil {
@@ -54,7 +62,7 @@ func (a *App) addSyncEventHandler(ctx context.Context, opts SyncOptions, message
 	if !opts.WebhookEvents.Enabled(SyncWebhookEventMessage) {
 		enqueueWebhookMessage = func(wa.ParsedMessage) {}
 	}
-	handlerID := a.wa.AddEventHandler(func(evt any) {
+	handle := func(evt any) {
 		if mediaQ != nil {
 			if !mediaQ.beginProducer() {
 				return
@@ -238,8 +246,8 @@ func (a *App) addSyncEventHandler(ctx context.Context, opts SyncOptions, message
 			default:
 			}
 		}
-	})
-	return handlerID, &appStateRecoveries
+	}
+	return handle, &appStateRecoveries
 }
 
 func (a *App) handleKeepAliveTimeout(opts SyncOptions, evt *events.KeepAliveTimeout, staleReconnect chan<- staleReconnectRequest) {

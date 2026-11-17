@@ -148,6 +148,7 @@ func (a *App) Sync(ctx context.Context, opts SyncOptions) (SyncResult, error) {
 		defer stopWebhook()
 	}
 
+	a.dropBacklogKeeper()
 	handlerID, appStateRecoveries := a.addSyncEventHandler(syncCtx, opts, &messagesStored, &lastEvent, disconnected, loggedOut, staleReconnect, enqueueMedia, enqueueWebhook, limits, mediaQ)
 	defer a.wa.RemoveEventHandler(handlerID)
 

@@ -104,8 +104,8 @@ func TestConnectRequiresConfirmedLoginBeforeClearingRevocation(t *testing.T) {
 			if got, err := SessionRevoked(a.StoreDir()); err != nil || got != tc.wantRevoked {
 				t.Fatalf("SessionRevoked = %v, %v; want %v", got, err, tc.wantRevoked)
 			}
-			if len(f.handlers) != 1 {
-				t.Fatalf("session observer count = %d, want 1", len(f.handlers))
+			if len(f.handlers) != 2 {
+				t.Fatalf("handlers = %d, want the session observer and the backlog keeper", len(f.handlers))
 			}
 			a.Close()
 			if len(f.handlers) != 0 {
@@ -207,8 +207,8 @@ func TestReusingConfirmedConnectionDoesNotClearMarkerAgain(t *testing.T) {
 	if revoked, err := SessionRevoked(a.StoreDir()); err != nil || !revoked {
 		t.Fatalf("connection reuse cleared marker: %v, %v", revoked, err)
 	}
-	if f.connectCalls != 1 || len(f.handlers) != 1 {
-		t.Fatalf("reuse duplicated connection/observer: calls=%d handlers=%d", f.connectCalls, len(f.handlers))
+	if f.connectCalls != 1 || len(f.handlers) != 2 {
+		t.Fatalf("reuse duplicated connection, observer or backlog keeper: calls=%d handlers=%d", f.connectCalls, len(f.handlers))
 	}
 }
 
