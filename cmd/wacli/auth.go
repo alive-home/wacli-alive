@@ -344,7 +344,8 @@ func pairPageStoreFlag(flags *rootFlags, storeDir string) string {
 	if flags.storeDir == "" && strings.TrimSpace(flags.account) == "" && os.Getenv(config.EnvStoreDir) == "" {
 		return ""
 	}
-	return fmt.Sprintf("--store %q", storeDir)
+	// Plain quotes here too: this text is shown to a person and pasted as is.
+	return `--store "` + storeDir + `"`
 }
 
 func pairPageQRWriter(page *pairpage.Page, stderr io.Writer, events *out.EventWriter) func(string) {

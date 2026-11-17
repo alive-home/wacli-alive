@@ -455,6 +455,11 @@ func TestPairPageStoreFlag(t *testing.T) {
 	if got := pairPageStoreFlag(&rootFlags{}, "/data/wa"); got != want {
 		t.Fatalf("env store: flag = %q, want %q", got, want)
 	}
+	// A Windows path is shown as it is typed, its backslashes single.
+	windows := `C:\Users\anna\wa store`
+	if got := pairPageStoreFlag(&rootFlags{storeDir: windows}, windows); got != `--store "C:\Users\anna\wa store"` {
+		t.Fatalf("a Windows store: flag = %s", got)
+	}
 }
 
 func TestPairPageQRWriter(t *testing.T) {
