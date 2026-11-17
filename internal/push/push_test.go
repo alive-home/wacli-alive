@@ -496,7 +496,7 @@ func TestReceiverPromptNamesWhatIsPosted(t *testing.T) {
 			}
 		}
 	}
-	for _, want := range []string{"X-Wacli-Key-Id", "X-Wacli-Signature", `"schema": 1`, "at most 200 items", "256 KB", "person + chat_jid + msg_id", "verify_jwt = false", "Answer me in Dutch."} {
+	for _, want := range []string{"X-Wacli-Key-Id", "X-Wacli-Signature", `"schema": 1`, "at most 200 items", "256 KB", "person + chat_jid + msg_id", "verify_jwt = false", "X-Wacli-Read-Key", "X-Wacli-Enroll-Secret", "WACLI_READ_KEY", "WACLI_ENROLL_SECRET", "A status request", "Read key:", "Answer me in Dutch."} {
 		if !strings.Contains(prompt, want) {
 			t.Errorf("the prompt misses %q", want)
 		}

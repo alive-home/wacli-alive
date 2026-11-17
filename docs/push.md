@@ -119,9 +119,11 @@ When the store should end up in a project of your own that an AI agent works on,
 wacli push prompt | pbcopy
 ```
 
-Paste the text into the agent's chat. It describes the request, the signature and the rules of this page, and asks the agent to build the endpoint, make a key, test with signed requests of its own, and answer with two lines: the address and the key. Those are what `push install` asks for. `--lang nl` has the agent answer in Dutch; `--json` gives the text as `prompt`. The command opens no store and reaches nothing.
+Paste the text into the agent's chat. It describes the request, the signature and the rules of this page, and asks the agent to build the endpoint, make your keys, test with signed requests of its own, and answer with three lines: the address, the key and the read key. The first two are what `push install` asks for; the read key stays in the project. `--lang nl` has the agent answer in Dutch; `--json` gives the text as `prompt`. The command opens no store and reaches nothing.
 
-Every stored row belongs to the person of the key it came with, so a team shares one receiver: each further person pastes the same text in the same project, and the agent adds a key for them instead of building again. The text also says what holds when the project runs on Supabase (an Edge Function without Supabase's JWT check, tables only the service role reads).
+Every stored row belongs to the person of the key it came with, so a team shares one receiver: each further person pastes the same text in the same project, and their agent enrolls them at the endpoint instead of building again. That takes the project's enrollment secret (`WACLI_ENROLL_SECRET`, shared with every agent of the project) and no access to the database, and it only ever makes a new person.
+
+Reading goes through the endpoint too, and a person reads only their own rows. Each person has a read key beside the push key, saved as a secret only that person has (`WACLI_READ_KEY`), and an agent reads with the key of the person it works for. So colleagues in one project do not read each other's WhatsApp. The endpoint keeps when each read key last read, and a status request with the read key shows a person their own: the last post, the last read and the reads per day. Whoever administers the database can still read every row; the agent says who that is. The text also says what holds when the project runs on Supabase (an Edge Function without Supabase's JWT check, tables that stay closed to everything but the function).
 
 ## Running it on a schedule
 
