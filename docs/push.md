@@ -121,7 +121,7 @@ wacli push prompt | pbcopy
 
 Paste the text into the agent's chat. It describes the request, the signature and the rules of this page, and asks the agent to build the endpoint, make a key, test with signed requests of its own, and answer with two lines: the address and the key. Those are what `push install` asks for. `--lang nl` has the agent answer in Dutch; `--json` gives the text as `prompt`. The command opens no store and reaches nothing.
 
-For a team, say so in the same chat: the prompt then has the agent make a key per person.
+Every stored row belongs to the person of the key it came with, so a team shares one receiver: each further person pastes the same text in the same project, and the agent adds a key for them instead of building again. The text also says what holds when the project runs on Supabase (an Edge Function without Supabase's JWT check, tables only the service role reads).
 
 ## Running it on a schedule
 
