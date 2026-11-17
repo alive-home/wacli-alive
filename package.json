@@ -18,6 +18,8 @@
     "format": "gofmt -w .",
     "format:check": "bash -c 'out=$(gofmt -l .); if [ -n \"$out\" ]; then echo \"$out\"; exit 1; fi'",
     "generate:sqlc": "go tool github.com/sqlc-dev/sqlc/cmd/sqlc generate",
-    "docs:site": "bun scripts/build-docs-site.mjs"
+    "docs:site": "bun scripts/build-docs-site.mjs",
+    "pack:mac": "bun scripts/pack-mac.mjs",
+    "draw:disk-image": "bun scripts/draw-disk-image.mjs"
   }
 }

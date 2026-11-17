@@ -45,7 +45,7 @@ func wantState(t *testing.T, dir, state string) (html, js string) {
 
 func TestPageFollowsPairing(t *testing.T) {
 	dir := t.TempDir()
-	p := New(dir, "", English)
+	p := New(dir, "wacli", English)
 	if err := p.Start(); err != nil {
 		t.Fatal(err)
 	}
@@ -97,7 +97,7 @@ func TestPageFollowsPairing(t *testing.T) {
 
 func TestFinishSaysHowItEnded(t *testing.T) {
 	dir := t.TempDir()
-	p := New(dir, "", English)
+	p := New(dir, "wacli", English)
 	if err := p.Start(); err != nil {
 		t.Fatal(err)
 	}
@@ -107,7 +107,7 @@ func TestFinishSaysHowItEnded(t *testing.T) {
 	wantState(t, dir, stateStopped)
 
 	dir = t.TempDir()
-	p = New(dir, "", English)
+	p = New(dir, "wacli", English)
 	if err := p.Start(); err != nil {
 		t.Fatal(err)
 	}
@@ -125,7 +125,7 @@ func TestFinishSaysHowItEnded(t *testing.T) {
 
 func TestLivePageExpires(t *testing.T) {
 	dir := t.TempDir()
-	p := New(dir, "", English)
+	p := New(dir, "wacli", English)
 	at := time.Date(2026, 11, 12, 15, 0, 0, 0, time.UTC)
 	p.now = func() time.Time { return at }
 	if err := p.set(func(v *view) { v.State = stateScan }); err != nil {
@@ -146,7 +146,7 @@ func TestPageFilesArePrivate(t *testing.T) {
 		t.Skip("no owner-only mode bits on Windows")
 	}
 	dir := t.TempDir()
-	p := New(dir, "", English)
+	p := New(dir, "wacli", English)
 	if err := p.Start(); err != nil {
 		t.Fatal(err)
 	}
@@ -221,7 +221,7 @@ func TestBothLanguagesSayEverything(t *testing.T) {
 
 	page := func(lang string) string {
 		dir := t.TempDir()
-		p := New(dir, "", lang)
+		p := New(dir, "wacli", lang)
 		if err := p.Start(); err != nil {
 			t.Fatal(err)
 		}
@@ -283,11 +283,11 @@ func TestQRPathDrawsEveryDarkModule(t *testing.T) {
 }
 
 func TestPromptPointsAtTheStore(t *testing.T) {
-	plain := Prompt("en", "/Users/anna/.alive-wapp", "")
+	plain := Prompt("en", "/Users/anna/.alive-wapp", "wacli")
 	if !strings.Contains(plain, "- wacli chats list: ") || !strings.Contains(plain, "/Users/anna/.alive-wapp") || !strings.Contains(plain, `messages search "text"`) {
 		t.Fatalf("prompt = %s", plain)
 	}
-	elsewhere := Prompt("nl", "/data/wa", `--store "/data/wa"`)
+	elsewhere := Prompt("nl", "/data/wa", `wacli --store "/data/wa"`)
 	for _, line := range strings.Split(elsewhere, "\n") {
 		if strings.HasPrefix(line, "- wacli ") && !strings.HasPrefix(line, `- wacli --store "/data/wa" `) {
 			t.Fatalf("command does not reach the store: %s", line)
@@ -324,7 +324,7 @@ func TestWriteSamples(t *testing.T) {
 			if err := os.MkdirAll(dir, 0o700); err != nil {
 				t.Fatal(err)
 			}
-			p := New(dir, "", lang)
+			p := New(dir, "wacli", lang)
 			// Far enough ahead that a sample is still current when it is looked at.
 			p.now = func() time.Time { return time.Now().Add(24 * time.Hour) }
 			if v.State == stateScan {

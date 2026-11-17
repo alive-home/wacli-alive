@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"context"
 	"database/sql"
+	"fmt"
 	"math"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -384,6 +386,41 @@ func TestPhoneFromLinkedJID(t *testing.T) {
 	}
 }
 
+// A prompt names the program by its path when `wacli` finds another program
+// or none, as in an app bundle; the store flag follows either form.
+func TestPairPagePromptNamesAProgramThatIsNotOnThePath(t *testing.T) {
+	dir := t.TempDir()
+	exe := filepath.Join(dir, "wacli.app", "Contents", "Helpers", "wacli")
+	other := filepath.Join(dir, "other")
+	for _, path := range []string{exe, other} {
+		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(path), 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	found := func(path string) func(string) (string, error) {
+		return func(string) (string, error) { return path, nil }
+	}
+	missing := func(string) (string, error) { return "", exec.ErrNotFound }
+	if got := pairPageProgram(exe, found(exe)); got != "wacli" {
+		t.Fatalf("on the PATH: %q", got)
+	}
+	for name, lookPath := range map[string]func(string) (string, error){"another wacli": found(other), "none": missing} {
+		if got := pairPageProgram(exe, lookPath); got != fmt.Sprintf("%q", exe) {
+			t.Fatalf("%s on the PATH: %q", name, got)
+		}
+	}
+}
+
+// --page writes the same page as --open and has the same limits.
+func TestValidateAuthOptionsPage(t *testing.T) {
+	if _, err := validateAuthOptions(&rootFlags{}, authOptions{pageOnly: true, phone: "+15551234567"}); err == nil {
+		t.Fatal("--page with --phone was accepted")
+	}
+}
+
 func TestValidateAuthOptionsOpen(t *testing.T) {
 	if _, err := validateAuthOptions(&rootFlags{}, authOptions{openPage: true}); err != nil {
 		t.Fatalf("--open alone: %v", err)
@@ -418,7 +455,7 @@ func TestPairPageStoreFlag(t *testing.T) {
 
 func TestPairPageQRWriter(t *testing.T) {
 	dir := t.TempDir()
-	page := pairpage.New(dir, "", "nl")
+	page := pairpage.New(dir, "wacli", "nl")
 	if err := page.Start(); err != nil {
 		t.Fatal(err)
 	}

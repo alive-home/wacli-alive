@@ -10,6 +10,9 @@ Without this command (or `sync --webhook`), nothing is posted anywhere.
 
 ```bash
 wacli push --url URL [--key-file FILE] [--sync] [--every DURATION] [--dry-run] [--allow-private]
+wacli push install --url URL [--key-file FILE | --key-stdin] [--allow-private]
+wacli push status
+wacli push uninstall
 ```
 
 - `--url URL` is where each request goes. It must be `https`. A redirect is never followed.
@@ -18,6 +21,7 @@ wacli push --url URL [--key-file FILE] [--sync] [--every DURATION] [--dry-run] [
 - `--every DURATION` keeps running and repeats, at least `1m`. A failed round keeps its place and the next round sends it again.
 - `--dry-run` counts what would be posted. It posts nothing and keeps no position.
 - `--allow-private` allows `http` and URLs that resolve to localhost or a private network, for a receiver on your own machine or tailnet.
+- `push install`, `push status` and `push uninstall` have the system run it every 15 minutes. See [Running it on a schedule](#running-it-on-a-schedule).
 
 ## What a run does
 
@@ -107,43 +111,23 @@ wacli push --url http://127.0.0.1:8787/ --key-file push.key --allow-private
 
 ## Running it on a schedule
 
-`--every` repeats for as long as the terminal stays open. To keep a computer sending without one, let the system start a run every 15 minutes. A run that is still going is not started a second time.
-
-macOS: save this as `~/Library/LaunchAgents/wacli-push.plist`. Write every path in full; launchd does not expand `~`.
-
-```xml
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-  <key>Label</key><string>wacli-push</string>
-  <key>ProgramArguments</key>
-  <array>
-    <string>/Users/you/.local/bin/wacli</string>
-    <string>push</string>
-    <string>--url</string><string>https://example.com/wacli</string>
-    <string>--key-file</string><string>/Users/you/.config/wacli-push.key</string>
-    <string>--sync</string>
-  </array>
-  <key>RunAtLoad</key><true/>
-  <key>StartInterval</key><integer>900</integer>
-  <key>StandardOutPath</key><string>/Users/you/Library/Logs/wacli-push.log</string>
-  <key>StandardErrorPath</key><string>/Users/you/Library/Logs/wacli-push.log</string>
-</dict>
-</plist>
-```
+`--every` repeats for as long as the terminal stays open. To keep a computer sending without one:
 
 ```bash
-launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/wacli-push.plist   # runs now, every 15 minutes, and after each login
-launchctl bootout gui/$(id -u)/wacli-push                                  # stop
+wacli push install --url https://example.com/wacli --key-file ~/.config/wacli-push.key
+wacli push status
+wacli push uninstall
 ```
 
-Windows: one task in Task Scheduler, for the signed-in user.
+- `install` first posts one request without content and with `"more": true`. A receiver that does not answer 2xx (a wrong key, a wrong address) is reported at once and nothing is installed.
+- Then the system starts a round now, every 15 minutes, and after each sign-in: a launchd agent named `wacli-push` on macOS, a task named `wacli-push` in Task Scheduler on Windows, both for the signed-in user. A round fetches what is new from WhatsApp, as `--sync` does, and pushes. A round that is still going is not started a second time.
+- The URL and the path of the key file are kept in `scheduled-push.json` in the store directory, owner-only. The scheduled command is `wacli --store DIR push --installed`: the URL is not in it, because a job's arguments are readable by every program on the computer. With `--key-stdin` the key is read from standard input and kept beside it, as `scheduled-push.key`.
+- `status` names the receiver's host and how the last round ended. `--json` gives `installed`, `scheduled` (the system still holds the job), `host`, `every_seconds` and `last_run`.
+- `uninstall` removes the job, the saved URL and a key that `--key-stdin` stored. The position stays, so installing again for the same URL sends what is new.
+- One schedule per user. The job runs the program from where it was when `install` ran: after moving it, run `install` again.
+- On Linux there is no scheduler to hand it to; start `wacli push --url URL --key-file FILE --sync` from cron or a systemd timer.
 
-```bat
-schtasks /Create /TN wacli-push /SC MINUTE /MO 15 /TR "C:\Tools\wacli.exe push --url https://example.com/wacli --key-file C:\Users\you\wacli-push.key --sync"
-schtasks /Delete /TN wacli-push /F
-```
+The [Mac app](install.md#mac-app) does the same from its Settings window.
 
 ## Examples
 

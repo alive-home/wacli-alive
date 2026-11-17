@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"os"
@@ -20,6 +19,7 @@ type pushFlags struct {
 	allowPrivate bool
 	dryRun       bool
 	sync         bool
+	installed    bool
 	every        time.Duration
 }
 
@@ -33,6 +33,12 @@ func newPushCmd(flags *rootFlags) *cobra.Command {
 			"what that URL has not had yet.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if p.installed {
+				if p.url != "" || p.keyFile != "" || p.allowPrivate || p.dryRun || p.sync || p.every != 0 {
+					return fmt.Errorf("--installed takes what `push install` saved and cannot be combined with other flags")
+				}
+				return runInstalledPush(flags)
+			}
 			if p.url == "" {
 				return fmt.Errorf("--url is required")
 			}
@@ -49,12 +55,9 @@ func newPushCmd(flags *rootFlags) *cobra.Command {
 			}
 			var key []byte
 			if p.keyFile != "" {
-				data, err := readRegularFileLimited(p.keyFile, 4096)
-				if err != nil {
-					return fmt.Errorf("read --key-file: %w", err)
-				}
-				if key = bytes.TrimSpace(data); len(key) == 0 {
-					return fmt.Errorf("--key-file is empty")
+				var err error
+				if key, err = readPushKey(p.keyFile); err != nil {
+					return err
 				}
 			}
 			ctx, stop := signalContextWithEvents(out.NewEventWriter(os.Stderr, flags.events))
@@ -98,6 +101,8 @@ func newPushCmd(flags *rootFlags) *cobra.Command {
 	cmd.Flags().BoolVar(&p.dryRun, "dry-run", false, "count what would be posted; post nothing and keep the position")
 	cmd.Flags().BoolVar(&p.sync, "sync", false, "fetch what is new from WhatsApp first (as sync --once)")
 	cmd.Flags().DurationVar(&p.every, "every", 0, "keep running and repeat after this long, e.g. 15m")
+	cmd.Flags().BoolVar(&p.installed, "installed", false, "one round with what `push install` saved, after a sync; what the schedule runs")
+	cmd.AddCommand(newPushInstallCmd(flags), newPushUninstallCmd(flags), newPushStatusCmd(flags))
 	return cmd
 }
 

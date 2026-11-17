@@ -477,3 +477,26 @@ func TestEachDestinationKeepsItsOwnPlace(t *testing.T) {
 		t.Fatalf("position file mode = %v, want owner-only", info.Mode())
 	}
 }
+
+// The check before a schedule is installed: one signed request without
+// content that says more follows, which leaves the full copy still to do.
+func TestCheckProvesTheURLAndKeyWithoutSendingContent(t *testing.T) {
+	f := newFixture(t)
+	f.message("a", "one")
+	if err := Check(context.Background(), f.db, f.opts); err != nil {
+		t.Fatalf("Check: %v", err)
+	}
+	reqs := f.rc.take()
+	if len(reqs) != 1 || !reqs[0].More || len(reqs[0].Messages) != 0 || !strings.HasPrefix(reqs[0].sig, "sha256=") {
+		t.Fatalf("check sent %+v, want one signed request with more=true and no messages", reqs)
+	}
+	f.rc.answer(http.StatusUnauthorized)
+	if err := Check(context.Background(), f.db, f.opts); err == nil || !strings.Contains(err.Error(), "answered 401") {
+		t.Fatalf("Check against a receiver that refuses the key: err = %v", err)
+	}
+	f.rc.answer(http.StatusOK)
+	f.rc.take()
+	if _, reqs := f.run(); !slices.Equal(messageIDs(reqs), []string{"a"}) {
+		t.Fatalf("after the check the first run sent %v, want [a]", messageIDs(reqs))
+	}
+}

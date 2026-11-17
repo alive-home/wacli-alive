@@ -34,7 +34,9 @@ Your messages and session keys stay in the store directory on your disk, readabl
 
 ## Install
 
-Build it from this repository. You need Go 1.27.0 or newer and a C compiler.
+**On a Mac:** download [wacli.dmg](https://github.com/alive-home/wacli-alive/releases/latest/download/wacli.dmg), drag wacli to Applications and open it. Its window shows the code to scan with your phone; nothing needs a terminal. See [the Mac app](docs/install.md#mac-app).
+
+**From source,** on any system: build it from this repository. You need Go 1.27.0 or newer and a C compiler.
 
 ```sh
 mkdir -p dist
@@ -46,7 +48,7 @@ wacli --version
 
 The version ends in `-readonly`. If it does not, another `wacli` is earlier on your `PATH`.
 
-Do not install `wacli` with Homebrew, `go install`, or upstream's release archives. Those are the upstream build, which can send.
+Do not install `wacli` with Homebrew, `go install`, or the release archives of openclaw/wacli. Those are the upstream build, which can send.
 
 See the [installation guide](docs/install.md) for platform notes and Docker.
 

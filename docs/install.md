@@ -1,13 +1,30 @@
 ---
 title: Install
-description: "Build the read-only wacli from source and put it on your PATH."
+description: "Install the read-only wacli: the Mac app, or a build from source."
 ---
 
 # Install
 
-This read-only build of `wacli` is built from source. There is no Homebrew formula and no release archive for it.
+This read-only build of `wacli` comes as an app for the Mac, and as source to build on any system. There is no Homebrew formula for it.
 
-Do not install `wacli` with Homebrew, `go install`, or upstream's release archives. Those are the upstream build, which can send.
+Do not install `wacli` with Homebrew, `go install`, or the release archives of openclaw/wacli. Those are the upstream build, which can send.
+
+## Mac app
+
+Download [wacli.dmg](https://github.com/alive-home/wacli-alive/releases/latest/download/wacli.dmg), open it, drag wacli to Applications, and open it from there. It runs on macOS 13 or newer, on Apple Silicon and Intel Macs. The app is signed with a Developer ID and notarized by Apple, so macOS opens it without a warning.
+
+- **The window links WhatsApp.** It shows the code to scan with your phone, then that WhatsApp is linked and how many messages came in. It is the [pairing page](auth.md#pairing-page) of `wacli auth`, in English or Dutch after the Mac's language. Opening the app again later fetches what is new.
+- **Settings (⌘,) can send a copy to a server.** Fill in the address and the key of your receiver and turn it on: the app checks that the receiver takes them, then the Mac pushes every 15 minutes. It is [`push install`](push.md#running-it-on-a-schedule); Settings shows how the last run ended. Off by default.
+- **The program is inside the app,** at `/Applications/wacli.app/Contents/Helpers/wacli`. The text for your AI assistant on the pairing page names it by that path. To type `wacli` in a terminal, link it into a directory on your `PATH`:
+
+```bash
+mkdir -p ~/.local/bin
+ln -s /Applications/wacli.app/Contents/Helpers/wacli ~/.local/bin/wacli
+```
+
+The app never checks for updates. To update, download the disk image again and replace the app; the store and the link with your phone stay. To remove it: turn off sending in Settings, delete the app, delete the store directory (`~/.alive-wapp`), and log the device out in WhatsApp on your phone, under Linked devices.
+
+To build the app yourself: `bun run pack:mac -- --dev` makes `dist/mac/wacli.app`, signed for your Mac alone (it needs Xcode besides the tools below). Without `--dev` the script signs with the Developer ID named in `scripts/pack-mac.mjs`, has Apple notarize the app, and builds `dist/mac/wacli.dmg`.
 
 ## Build from source
 

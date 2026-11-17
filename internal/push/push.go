@@ -66,23 +66,45 @@ type run struct {
 	res  Result
 }
 
+// Check posts one request without content that says more will follow. A
+// receiver that answers 2xx takes this URL and key; it is not told that the
+// store is caught up, and no position moves.
+func Check(ctx context.Context, db *store.DB, opts Options) error {
+	post, _, err := open(db, opts)
+	if err != nil {
+		return err
+	}
+	env := post.newEnvelope()
+	env.More = true
+	return post.post(ctx, env)
+}
+
+// open makes the poster for this store and reads where its journal stands.
+func open(db *store.DB, opts Options) (*poster, store.ChangesPage, error) {
+	post, err := newPoster(opts)
+	if err != nil {
+		return nil, store.ChangesPage{}, err
+	}
+	now, err := db.MessageChanges("", true, 0)
+	if err != nil {
+		return nil, store.ChangesPage{}, err
+	}
+	post.storeID = now.StoreID
+	if post.lastSync, err = db.LastSuccessfulSync(); err != nil {
+		return nil, store.ChangesPage{}, err
+	}
+	return post, now, nil
+}
+
 // Run sends everything the destination has not had yet and ends with one
 // closing request, also when there was nothing to send: that request is the
 // sign of life.
 func Run(ctx context.Context, db *store.DB, opts Options) (Result, error) {
-	post, err := newPoster(opts)
+	post, now, err := open(db, opts)
 	if err != nil {
 		return Result{}, err
 	}
 	r := &run{db: db, opts: opts, post: post, path: positionPath(opts.StoreDir, opts.URL)}
-	now, err := db.MessageChanges("", true, 0)
-	if err != nil {
-		return Result{}, err
-	}
-	post.storeID = now.StoreID
-	if post.lastSync, err = db.LastSuccessfulSync(); err != nil {
-		return Result{}, err
-	}
 	if err := r.loadPosition(now); err != nil {
 		return Result{}, err
 	}

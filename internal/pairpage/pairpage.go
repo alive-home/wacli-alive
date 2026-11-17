@@ -71,10 +71,10 @@ func (v view) live() bool {
 
 // Page writes the pairing page as pairing moves along.
 type Page struct {
-	storeDir  string
-	storeFlag string
-	lang      string
-	now       func() time.Time
+	storeDir string
+	command  string
+	lang     string
+	now      func() time.Time
 
 	mu     sync.Mutex
 	cur    view
@@ -83,11 +83,11 @@ type Page struct {
 	stop   chan struct{}
 }
 
-// New prepares a page in storeDir. storeFlag is what a command needs to reach
-// this store (`--store "…"`), or empty when a bare `wacli` already does. lang
-// is the language asked for; see Language.
-func New(storeDir, storeFlag, lang string) *Page {
-	return &Page{storeDir: storeDir, storeFlag: storeFlag, lang: Language(lang), now: time.Now, stop: make(chan struct{})}
+// New prepares a page in storeDir. command is how a person calls this wacli
+// for this store (`wacli`, `wacli --store "…"`, or the program's full path).
+// lang is the language asked for; see Language.
+func New(storeDir, command, lang string) *Page {
+	return &Page{storeDir: storeDir, command: command, lang: Language(lang), now: time.Now, stop: make(chan struct{})}
 }
 
 // Path is the file a browser opens.
@@ -170,7 +170,7 @@ func (p *Page) set(change func(*view)) error {
 		p.cur.Until = now.Add(staleAfter).UnixMilli()
 	}
 
-	html, err := renderHTML(p.cur, p.lang, p.storeDir, p.storeFlag)
+	html, err := renderHTML(p.cur, p.lang, p.storeDir, p.command)
 	if err != nil {
 		return err
 	}
@@ -188,7 +188,7 @@ func (p *Page) set(change func(*view)) error {
 	return nil
 }
 
-func renderHTML(v view, lang, storeDir, storeFlag string) ([]byte, error) {
+func renderHTML(v view, lang, storeDir, command string) ([]byte, error) {
 	var buf bytes.Buffer
 	err := pageTemplate.Execute(&buf, map[string]any{
 		"View":     v,
@@ -198,7 +198,7 @@ func renderHTML(v view, lang, storeDir, storeFlag string) ([]byte, error) {
 		"StoreDir": storeDir,
 		"Source":   SourceURL,
 		"SourceID": strings.TrimPrefix(SourceURL, "https://"),
-		"Prompt":   Prompt(lang, storeDir, storeFlag),
+		"Prompt":   Prompt(lang, storeDir, command),
 		"Script":   jsName,
 	})
 	if err != nil {
@@ -255,12 +255,9 @@ var TaughtCommands = func() []string {
 }()
 
 // Prompt is the text a person pastes into their AI assistant so it knows what
-// this link is and how to read from it. lang is Dutch or English.
-func Prompt(lang, storeDir, storeFlag string) string {
-	wacli := "wacli"
-	if storeFlag != "" {
-		wacli += " " + storeFlag
-	}
+// this link is and how to read from it. lang is Dutch or English; wacli is
+// how to call the program, see New.
+func Prompt(lang, storeDir, wacli string) string {
 	t := texts[lang]
 	var b strings.Builder
 	b.WriteString(t.PromptStart)

@@ -7,7 +7,7 @@ Read when: pairing a store, checking auth state, or choosing QR vs phone pairing
 ## Commands
 
 ```bash
-wacli auth [--open [--lang nl|en]] [--follow] [--idle-exit 30s] [--download-media] [--qr-format terminal|text] [--phone PHONE] [--events]
+wacli auth [--open|--page [--lang nl|en]] [--follow] [--idle-exit 30s] [--download-media] [--qr-format terminal|text] [--phone PHONE] [--events]
 wacli auth status
 wacli auth logout
 wacli --account work auth status
@@ -17,6 +17,7 @@ wacli --account work auth status
 
 - Default pairing prints a terminal QR code.
 - `--open` shows the QR code on a page in the default browser instead of in the terminal, for people who would rather not use one. See [Pairing page](#pairing-page).
+- `--page` writes the same page without opening a browser, for a program that shows the page itself; the Mac app does. The `pair_page` event carries the path.
 - `--lang nl|en` sets the language of that page. Anything else gives English, which is also the default.
 - `--qr-format text` prints the raw QR payload for external renderers.
 - `--phone PHONE` uses WhatsApp phone-number pairing instead of QR pairing.
@@ -41,7 +42,8 @@ wacli --account work auth status
 - Below that it tells the person what the link can read, how it works, where the data is stored, and where the source can be read. It ends with a text they can copy into their AI assistant, which explains that this build only reads and lists the commands to start with.
 - The page follows the running command. When the command ends or is killed, the page says so within a minute; start `wacli auth --open` again for a new code.
 - With `--events`, a `pair_page` event carries the path and whether a browser was opened, and `qr_code` events are still emitted. Without `--events`, the path is printed on stderr, also when no browser could be opened.
-- `--open` cannot be combined with `--phone` or `--qr-format text`.
+- `--open` and `--page` cannot be combined with `--phone` or `--qr-format text`.
+- The commands in the text for the AI assistant say `wacli` when that name finds this program on the `PATH`, and the program's full path when it does not.
 - A browser that is sandboxed away from hidden folders (some Linux snap and flatpak browsers) cannot read the page; pair in the terminal there.
 
 ## Examples

@@ -6,6 +6,7 @@ import (
 	"io"
 	"math"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -26,6 +27,7 @@ type authOptions struct {
 	downloadMedia  bool
 	qrFormat       string
 	openPage       bool
+	pageOnly       bool
 	lang           string
 	phone          string
 	historyDays    int
@@ -78,6 +80,7 @@ func addAuthFlags(cmd *cobra.Command, opts *authOptions) {
 	cmd.Flags().BoolVar(&opts.downloadMedia, "download-media", false, "download media in the background during sync")
 	cmd.Flags().StringVar(&opts.qrFormat, "qr-format", "terminal", "QR output format: terminal or text")
 	cmd.Flags().BoolVar(&opts.openPage, "open", false, "show the QR code on a page in the default browser instead of in the terminal")
+	cmd.Flags().BoolVar(&opts.pageOnly, "page", false, "write the --open page without opening a browser, for a program that shows it itself")
 	cmd.Flags().StringVar(&opts.lang, "lang", pairpage.English, "language of the --open page: nl or en (anything else gives en)")
 	cmd.Flags().StringVar(&opts.phone, "phone", "", "pair by phone number instead of QR code")
 	cmd.Flags().IntVar(&opts.historyDays, "history-days", 0, "days of history to ask the phone for while pairing (0 = no limit, what the phone decides)")
@@ -124,8 +127,8 @@ func runAuth(flags *rootFlags, opts authOptions) (res appPkg.SyncResult, err err
 	}
 	onQRCode := authQRWriter(validated.qrFormat, os.Stdout, os.Stderr, a.Events())
 	var onConnected func()
-	if opts.openPage {
-		page, pageErr := openPairPage(flags, a, opts.lang, os.Stderr)
+	if opts.openPage || opts.pageOnly {
+		page, pageErr := openPairPage(flags, a, opts, os.Stderr)
 		if pageErr != nil {
 			return appPkg.SyncResult{}, pageErr
 		}
@@ -164,6 +167,9 @@ func validateAuthOptions(flags *rootFlags, opts authOptions) (validatedAuthOptio
 	pairPhone, err := normalizePairPhone(opts.phone)
 	if err != nil {
 		return validatedAuthOptions{}, err
+	}
+	if opts.pageOnly {
+		opts.openPage = true
 	}
 	if opts.openPage && pairPhone != "" {
 		return validatedAuthOptions{}, fmt.Errorf("--open shows a QR code and cannot be combined with --phone")
@@ -272,16 +278,24 @@ func forgetRevokedSession(ctx context.Context, storeDir string) error {
 	return err
 }
 
-// openPairPage writes the pairing page and shows it in the default browser.
-// A browser that cannot be opened is not fatal: the path is printed instead.
-func openPairPage(flags *rootFlags, a *appPkg.App, lang string, stderr io.Writer) (*pairpage.Page, error) {
-	page := pairpage.New(a.StoreDir(), pairPageStoreFlag(flags, a.StoreDir()), lang)
+// openPairPage writes the pairing page and shows it in the default browser,
+// unless the caller shows it itself (--page). A browser that cannot be opened
+// is not fatal: the path is printed instead.
+func openPairPage(flags *rootFlags, a *appPkg.App, opts authOptions, stderr io.Writer) (*pairpage.Page, error) {
+	page := pairpage.New(a.StoreDir(), pairPageCommand(flags, a.StoreDir()), opts.lang)
 	if err := page.Start(); err != nil {
 		return nil, err
 	}
-	openErr := pairpage.Open(page.Path())
+	var openErr error
+	if !opts.pageOnly {
+		openErr = pairpage.Open(page.Path())
+	}
 	if a.Events().Enabled() {
-		_ = a.Events().Emit("pair_page", map[string]any{"path": page.Path(), "opened": openErr == nil})
+		_ = a.Events().Emit("pair_page", map[string]any{"path": page.Path(), "opened": !opts.pageOnly && openErr == nil})
+		return page, nil
+	}
+	if opts.pageOnly {
+		fmt.Fprintf(stderr, "The pairing page is at %s\n", page.Path())
 		return page, nil
 	}
 	if openErr != nil {
@@ -290,6 +304,32 @@ func openPairPage(flags *rootFlags, a *appPkg.App, lang string, stderr io.Writer
 	}
 	fmt.Fprintf(stderr, "The pairing page is open in your browser: %s\n", page.Path())
 	return page, nil
+}
+
+// pairPageCommand is how the commands in the page's prompt call this wacli
+// for this store: by name when that name finds this program, by its full path
+// when it does not (an app bundle, a build that is not on the PATH).
+func pairPageCommand(flags *rootFlags, storeDir string) string {
+	command := "wacli"
+	if exe, err := os.Executable(); err == nil {
+		command = pairPageProgram(exe, exec.LookPath)
+	}
+	if flag := pairPageStoreFlag(flags, storeDir); flag != "" {
+		command += " " + flag
+	}
+	return command
+}
+
+func pairPageProgram(exe string, lookPath func(string) (string, error)) string {
+	sameFile := func(a, b string) bool {
+		ai, errA := os.Stat(a)
+		bi, errB := os.Stat(b)
+		return errA == nil && errB == nil && os.SameFile(ai, bi)
+	}
+	if found, err := lookPath("wacli"); err == nil && sameFile(found, exe) {
+		return "wacli"
+	}
+	return fmt.Sprintf("%q", exe)
 }
 
 // pairPageStoreFlag is what the commands in the page's prompt need to reach

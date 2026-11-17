@@ -26,7 +26,8 @@ var errReadOnlyBuild = errors.New("wacli read-only build: this binary cannot sen
 // command tree is cut out, so a command upstream adds stays out until it is
 // listed here. List only commands that read from WhatsApp or work on the local
 // store. `push` is the one that posts the store elsewhere: to the URL its
-// caller passes, never to WhatsApp.
+// caller passes, never to WhatsApp. `push install` has the system start it on
+// a schedule, for that same URL.
 var readOnlyCommands = []string{
 	"accounts add", "accounts list", "accounts remove", "accounts show", "accounts use",
 	"auth", "auth logout", "auth status",
@@ -45,7 +46,7 @@ var readOnlyCommands = []string{
 	"messages purge", "messages search", "messages show", "messages starred",
 	"poll show", "polls list",
 	"profile business", "profile get-about", "profile picture-info",
-	"push",
+	"push", "push install", "push status", "push uninstall",
 	"store cleanup", "store stats",
 	"sync",
 	"version",

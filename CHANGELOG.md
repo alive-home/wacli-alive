@@ -7,10 +7,13 @@ This is the changelog of upstream openclaw/wacli, kept for reference. Entries ab
 - Based on upstream 0.26.0; reports its version as `0.26.0-readonly`.
 - Cannot send messages or change anything on WhatsApp: upstream wacli's code for it is removed (the whatsmeow library keeps its send functions, which nothing calls and a test guards), those commands only say they are not available, and a running `sync --follow` only answers `media download` and `contacts check` for other processes.
 - Never marks messages as read, shows typing, or announces the device as online.
-- No telemetry, update checks, CI, release publishing, or vulnerability-service lookups. The `docs` command (it opened upstream's site) is gone, the generated docs site loads nothing from the network, and `sync --send-spacing` and `sync --presence-mode` are removed with the code they steered.
+- No telemetry, update checks, CI, release pipeline, or vulnerability-service lookups. The `docs` command (it opened upstream's site) is gone, the generated docs site loads nothing from the network, and `sync --send-spacing` and `sync --presence-mode` are removed with the code they steered.
 - Build scripts run on Bun instead of Node.js and pnpm; there is nothing to install.
 - Default store is `~/.alive-wapp` (`~/.local/state/alive-wapp` on Linux) instead of upstream's `~/.wacli`, which is no longer read. Move an existing store there by hand, with no `wacli` running.
 - New `push` command: posts the stored messages, their changes and the call events to a URL you pass, signed with a key from a file. It only posts; see `docs/push.md`.
+- `push install` has macOS (launchd) or Windows (Task Scheduler) run that push every 15 minutes, after checking that the receiver takes the URL and key; `push status` says how the last round ended and `push uninstall` removes it.
+- A Mac app, `wacli.app` in `wacli.dmg`: its window links WhatsApp with the pairing page, its Settings turn the scheduled push on and off, and the program is inside it. Signed with a Developer ID and notarized; built by hand with `bun run pack:mac`. See `docs/install.md`.
+- `auth --page` writes the pairing page without opening a browser, and the page's text for an AI assistant names the program by its full path when `wacli` is not on the `PATH`.
 - whatsmeow is ahead of upstream 0.26.0 (2026-11-10): a contact, mute, pin or archive update whose checksum does not match but whose signature is valid is applied instead of stopping that sync, and a contact removed on the phone loses its name here too.
 
 ## Unreleased
