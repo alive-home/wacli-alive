@@ -30,6 +30,7 @@ Read when: you need the user-facing command map, global flags, store model, or l
 - [messages](messages.md) - list, search, show, and contextualize stored messages.
 - [calls](calls.md) - list stored WhatsApp call events.
 - [push](push.md) - post stored messages and calls to a URL you choose.
+- [app](app.md) - wacli as a page in your browser: link WhatsApp, turn the push on, see how it goes.
 - [media](media.md) - download media attached to stored messages.
 - [contacts](contacts.md) - search contacts and manage local aliases/tags.
 - [contacts import-system](contacts-import-system.md) - import macOS Contacts names into local contact metadata.

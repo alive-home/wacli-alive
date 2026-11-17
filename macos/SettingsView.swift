@@ -13,13 +13,29 @@ struct PushStatus: Decodable, Equatable {
         let result: Counts?
     }
 
+    /// What the receiver says about this Mac's messages; only in the answer
+    /// to `push status --receiver`, and only when the receiver gave one.
+    struct Receiver: Decodable, Equatable {
+        let lastReadAt: Date?
+        let readsToday: Int
+        let messages: Int
+        let calls: Int
+
+        enum CodingKeys: String, CodingKey {
+            case messages, calls
+            case lastReadAt = "last_read_at"
+            case readsToday = "reads_today"
+        }
+    }
+
     let installed: Bool
     let scheduled: Bool
     let host: String
     let lastRun: Run?
+    let receiver: Receiver?
 
     enum CodingKeys: String, CodingKey {
-        case installed, scheduled, host
+        case installed, scheduled, host, receiver
         case lastRun = "last_run"
     }
 }
@@ -33,6 +49,9 @@ private struct ReceiverPrompt: Decodable {
 /// on, it says where the copy goes and how the last run ended.
 struct SettingsView: View {
     @State private var status: PushStatus?
+    /// The receiver is asked on opening and once a minute, not at every look
+    /// at the schedule; what it said last stays in between.
+    @State private var receiver: PushStatus.Receiver?
     @State private var address = ""
     @State private var key = ""
     @State private var working = false
@@ -53,6 +72,12 @@ struct SettingsView: View {
                             .font(.callout)
                             .foregroundStyle(.secondary)
                             .textSelection(.enabled)
+                    }
+                    if let receiver {
+                        LabeledContent(texts.lastRead, value: receiver.lastReadAt.map {
+                            texts.read($0.formatted(.relative(presentation: .named)), receiver.readsToday)
+                        } ?? texts.neverRead)
+                        LabeledContent(texts.onServer, value: texts.holds(receiver.messages, receiver.calls))
                     }
                 } else {
                     TextField(texts.address, text: $address, prompt: Text(verbatim: "https://"))
@@ -106,8 +131,10 @@ struct SettingsView: View {
         .fixedSize(horizontal: false, vertical: true)
         .task {
             // The schedule runs on its own; show its latest run while the window is open.
+            var looks = 0
             while !Task.isCancelled {
-                if !working { await refresh() }
+                if !working { await refresh(askReceiver: looks % 3 == 0) }
+                looks += 1
                 try? await Task.sleep(for: .seconds(20))
             }
         }
@@ -128,11 +155,14 @@ struct SettingsView: View {
         }
     }
 
-    private func refresh() async {
+    private func refresh(askReceiver: Bool) async {
         let before = changes
         do {
-            let read = try await Wacli.json(PushStatus.self, ["push", "status"])
-            if before == changes, !working { status = read }
+            let read = try await Wacli.json(PushStatus.self, ["push", "status"] + (askReceiver ? ["--receiver"] : []))
+            if before == changes, !working {
+                status = read
+                if askReceiver || !read.installed { receiver = read.receiver }
+            }
         } catch let error as Wacli.Failure {
             failure = error.message
         } catch {
@@ -174,6 +204,7 @@ struct SettingsView: View {
         Task {
             do {
                 status = try await Wacli.json(PushStatus.self, arguments, input: input)
+                receiver = nil
                 key = ""
             } catch let error as Wacli.Failure {
                 failure = error.message

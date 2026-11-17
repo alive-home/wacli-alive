@@ -71,6 +71,13 @@ const server = Bun.serve({
     // A copy of an old request is refused; wacli signs sent_at with the rest.
     if (Math.abs(Date.now() - Date.parse(body.sent_at)) > 5 * 60_000) return new Response(null, { status: 401 });
 
+    // What wacli asks to show on its own computer. This example has no read
+    // key, so nothing was ever read; a real receiver answers its own counts.
+    if (body.status === true) {
+      const mine = (map) => [...map.entries()].filter(([id, row]) => id.startsWith(owner + "|") && !row.removed_at).length;
+      return Response.json({ last_read_at: null, reads_today: 0, messages: mine(messages), calls: mine(calls) });
+    }
+
     upsertMessages(owner, body.messages);
     removeMessages(owner, body.removed);
     upsertCalls(owner, body.calls);

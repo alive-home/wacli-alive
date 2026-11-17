@@ -1,6 +1,8 @@
 package main
 
 import (
+	"bufio"
+	"fmt"
 	"os"
 	"runtime"
 	"strings"
@@ -13,9 +15,33 @@ import (
 func main() {
 	configureOutputSignals()
 	applyDeviceLabel()
-	if err := execute(os.Args[1:]); err != nil {
+	args, opened := openedArgs(os.Args[1:], ownConsole())
+	var err error
+	ran := false
+	if opened {
+		ran, err = runSettled(settledDir())
+	}
+	if !ran {
+		err = execute(args)
+	}
+	if err != nil && opened {
+		// The window closes with the program: leave the reason on screen.
+		fmt.Fprint(os.Stderr, "\nPress Enter to close this window.")
+		_, _ = bufio.NewReader(os.Stdin).ReadString('\n')
+	}
+	if err != nil {
 		os.Exit(1)
 	}
+}
+
+// openedArgs is what to run: wacli opened by itself in a window of its own
+// (a double click on Windows) is the app page, not the help text of a command
+// line nobody typed.
+func openedArgs(args []string, ownConsole bool) ([]string, bool) {
+	if len(args) == 0 && ownConsole {
+		return []string{"app"}, true
+	}
+	return args, false
 }
 
 func applyDeviceLabel() {

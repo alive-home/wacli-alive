@@ -349,3 +349,68 @@ func TestWriteSamples(t *testing.T) {
 		}
 	}
 }
+
+// The page `wacli app` serves talks to the address it came from and to
+// nothing else, and the page a browser opens from disk has no panel.
+func TestServedPageTalksOnlyToItsOwnAddress(t *testing.T) {
+	for lang := range texts {
+		p := New(t.TempDir(), "wacli", lang)
+		if err := p.Start(); err != nil {
+			t.Fatal(err)
+		}
+		html, err := p.Served(lang)
+		if err != nil {
+			t.Fatal(err)
+		}
+		script, err := p.Script()
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = p.Finish(0, nil)
+		page := string(html)
+		for _, addr := range regexp.MustCompile(`(?i)(https?:)?//[a-z0-9.-]+\.[a-z]{2,}[^\s"'<)]*`).FindAllString(page, -1) {
+			if addr != SourceURL {
+				t.Errorf("%s: unexpected address in the served page: %s", lang, addr)
+			}
+		}
+		for _, loads := range []string{"<link", "<img", "<iframe", "@import", "url(", "XMLHttpRequest", "sendBeacon", "WebSocket", "EventSource"} {
+			if strings.Contains(page, loads) {
+				t.Errorf("%s: the served page must not contain %q", lang, loads)
+			}
+		}
+		// Every request the panel makes is a path beside the page.
+		for _, call := range regexp.MustCompile(`ask\(([^,)]+)`).FindAllStringSubmatch(page, -1) {
+			if strings.Contains(call[1], "//") || strings.Contains(call[1], "http") {
+				t.Errorf("%s: the panel asks %s", lang, call[1])
+			}
+		}
+		if !strings.Contains(page, `connect-src 'self'`) || strings.Contains(page, "file:") || !strings.Contains(page, `name="referrer" content="no-referrer"`) {
+			t.Errorf("%s: the served page must only reach its own address and send no referrer", lang)
+		}
+		if !strings.Contains(page, `id="turn-on"`) || !strings.Contains(page, `id="last-read"`) {
+			t.Errorf("%s: the served page has no panel", lang)
+		}
+		if !strings.HasPrefix(string(script), `pairState({"seq":`) || !strings.Contains(string(script), `"state":"starting"`) {
+			t.Errorf("%s: script = %s", lang, script)
+		}
+
+		file, err := renderHTML(view{State: stateDone}, lang, "/Users/anna/.alive-wapp", "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, panel := range []string{`id="turn-on"`, "connect-src", "data-push"} {
+			if strings.Contains(string(file), panel) {
+				t.Errorf("%s: the page opened from disk contains %q", lang, panel)
+			}
+		}
+	}
+	nl, en := texts[Dutch].Panel, texts[English].Panel
+	for name := range nl {
+		if en[name] == "" {
+			t.Errorf("panel text %q is missing in English", name)
+		}
+	}
+	if len(nl) != len(en) {
+		t.Errorf("the panel has %d Dutch and %d English sentences", len(nl), len(en))
+	}
+}

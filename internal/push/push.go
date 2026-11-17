@@ -1,7 +1,8 @@
 // Package push posts what the local store holds to a URL the user configured:
-// every message once, then each change, and the call events. It only posts.
-// Nothing in a response is read beyond the status code, so the receiving side
-// cannot ask this computer for anything.
+// every message once, then each change, and the call events. A push reads
+// nothing from a response beyond the status code, so the receiving side cannot
+// ask this computer for anything. The one answer that is read is the status a
+// person asks for (AskStatus): four counters, each a time or a number.
 package push
 
 import (

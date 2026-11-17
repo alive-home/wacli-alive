@@ -75,3 +75,22 @@ func TestReadRegularFileLimitedRejectsNonRegularAndOversized(t *testing.T) {
 		t.Fatalf("data = %q", string(got))
 	}
 }
+
+func TestOpenedByItselfIsTheAppPage(t *testing.T) {
+	for _, tc := range []struct {
+		args       []string
+		ownConsole bool
+		want       string
+		opened     bool
+	}{
+		{nil, true, "app", true},
+		{nil, false, "", false},
+		{[]string{"doctor"}, true, "doctor", false},
+		{[]string{"--help"}, true, "--help", false},
+	} {
+		got, opened := openedArgs(tc.args, tc.ownConsole)
+		if strings.Join(got, " ") != tc.want || opened != tc.opened {
+			t.Errorf("openedArgs(%q, %v) = %q, %v; want %q, %v", tc.args, tc.ownConsole, got, opened, tc.want, tc.opened)
+		}
+	}
+}

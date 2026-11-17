@@ -31,6 +31,10 @@ const (
 	pushKeyFile = "scheduled-push.key"
 )
 
+// scheduledLockWait is how long a scheduled round waits for another wacli
+// that holds the store.
+var scheduledLockWait = 10 * time.Minute
+
 // pushSettings is what `push install` saved for the scheduled runs. The URL
 // stays in this file: it can hold a token, and a job's arguments are readable
 // by every program on the computer.
@@ -235,18 +239,72 @@ func newPushUninstallCmd(flags *rootFlags) *cobra.Command {
 }
 
 func newPushStatusCmd(flags *rootFlags) *cobra.Command {
-	return &cobra.Command{
+	var askReceiver bool
+	cmd := &cobra.Command{
 		Use:   "status",
 		Short: "Show whether a scheduled push is installed and how its last run ended",
-		Args:  cobra.NoArgs,
+		Long: "status reads what `push install` saved and reaches nothing. With --receiver it also asks the\n" +
+			"receiver when this computer's messages were last read there and how many it holds.",
+		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			storeDir, err := resolveStoreDir(flags)
 			if err != nil {
 				return err
 			}
-			return writePushStatus(flags, storeDir)
+			if !askReceiver {
+				return writePushStatus(flags, storeDir)
+			}
+			ctx, stop := signalContextWithEvents(out.NewEventWriter(os.Stderr, flags.events))
+			defer stop()
+			return writePushStatusWith(flags, storeDir, askPushReceiver(ctx, flags, storeDir))
 		},
 	}
+	cmd.Flags().BoolVar(&askReceiver, "receiver", false, "also ask the receiver when the messages were last read and how many it holds")
+	return cmd
+}
+
+// receiverAnswer is what the receiver said about this computer's messages, or
+// why there is no answer. Both are nil when nothing is installed.
+type receiverAnswer struct {
+	status *push.ReceiverStatus
+	err    error
+}
+
+// askPushReceiver asks the receiver of the installed push for its counters. A
+// receiver that does not answer is not a failure of `status`: the rest of it
+// is still true.
+func askPushReceiver(ctx context.Context, flags *rootFlags, storeDir string) receiverAnswer {
+	s, err := readPushSettings(storeDir)
+	if err != nil || s == nil {
+		return receiverAnswer{err: err}
+	}
+	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	status, err := func() (push.ReceiverStatus, error) {
+		var key []byte
+		if s.KeyFile != "" {
+			var err error
+			if key, err = readPushKey(s.KeyFile); err != nil {
+				return push.ReceiverStatus{}, err
+			}
+		}
+		a, lk, err := newApp(ctx, flags, false, false)
+		if err != nil {
+			return push.ReceiverStatus{}, err
+		}
+		defer closeApp(a, lk)
+		linked, _, err := readOnlyAuthStatus(a.StoreDir())
+		if err != nil {
+			return push.ReceiverStatus{}, err
+		}
+		return push.AskStatus(ctx, a.DB(), push.Options{
+			URL: s.URL, Key: key, AllowPrivate: s.AllowPrivate, StoreDir: a.StoreDir(), Version: a.Version(), Linked: linked,
+		})
+	}()
+	if err != nil {
+		return receiverAnswer{err: err}
+	}
+	return receiverAnswer{status: &status}
 }
 
 // runInstalledPush is one scheduled round: what is new from WhatsApp, then
@@ -266,6 +324,11 @@ func runInstalledPush(flags *rootFlags) error {
 	}
 	if s == nil {
 		return fmt.Errorf("no scheduled push is installed for this store; run `wacli push install`")
+	}
+	// The app that turned this on is often still fetching the first history:
+	// the round waits for the store instead of reporting a failed sync.
+	if flags.lockWait == 0 {
+		flags.lockWait = scheduledLockWait
 	}
 	ctx, stop := signalContextWithEvents(out.NewEventWriter(os.Stderr, flags.events))
 	defer stop()
@@ -333,6 +396,10 @@ func readJSONFile(path string, into any) (bool, error) {
 // writePushStatus prints what is installed. It names the receiver's host,
 // never the URL.
 func writePushStatus(flags *rootFlags, storeDir string) error {
+	return writePushStatusWith(flags, storeDir, receiverAnswer{})
+}
+
+func writePushStatusWith(flags *rootFlags, storeDir string, receiver receiverAnswer) error {
 	s, err := readPushSettings(storeDir)
 	if err != nil {
 		return err
@@ -357,10 +424,17 @@ func writePushStatus(flags *rootFlags, storeDir string) error {
 		}
 	}
 	if flags.asJSON {
-		return out.WriteJSON(os.Stdout, map[string]any{
+		data := map[string]any{
 			"installed": s != nil, "scheduled": scheduled, "host": host,
 			"every_seconds": int(pushJobEvery.Seconds()), "last_run": last,
-		})
+		}
+		if receiver.status != nil {
+			data["receiver"] = receiver.status
+		}
+		if receiver.err != nil {
+			data["receiver_error"] = receiver.err.Error()
+		}
+		return out.WriteJSON(os.Stdout, data)
 	}
 	switch {
 	case s == nil:
@@ -379,6 +453,16 @@ func writePushStatus(flags *rootFlags, storeDir string) error {
 			last.At.Local().Format("2006-01-02 15:04"), last.Result.Messages, last.Result.Removed, last.Result.Calls)
 	default:
 		fmt.Fprintf(os.Stdout, "Last run %s failed: %s\n", last.At.Local().Format("2006-01-02 15:04"), last.Error)
+	}
+	switch {
+	case receiver.err != nil:
+		fmt.Fprintf(os.Stdout, "The receiver gave no status: %v\n", receiver.err)
+	case receiver.status != nil:
+		read := "never read"
+		if at := receiver.status.LastReadAt; at != nil {
+			read = fmt.Sprintf("last read %s, %d times today", at.Local().Format("2006-01-02 15:04"), receiver.status.ReadsToday)
+		}
+		fmt.Fprintf(os.Stdout, "The receiver holds %d messages and %d calls of this computer: %s.\n", receiver.status.Messages, receiver.status.Calls, read)
 	}
 	return nil
 }

@@ -72,7 +72,7 @@ func kind(t reflect.Type) string {
 
 const receiverPrompt = `I want the messages and calls of my WhatsApp in this project. A program on my computer (wacli, read-only: it cannot send to or change WhatsApp) posts them to an address I give it: everything it holds once, then what is new every 15 minutes. Build the receiving side in this project, then give me the address and my keys.
 
-If this project already has an endpoint that checks X-Wacli-Signature (someone pasted this text here before me), build nothing twice: read that it does what is below, enroll me through it (see "A further person"), check with a status request that my read key works, and answer with the same address and my keys. Leave the tests of "Before you say it is done" to whoever built it: you may not be able to remove a test person. An endpoint that cannot enroll or has no read key was built from an older version of this text: bring it up to this one first when you can change it, and otherwise tell me who can.
+If this project already has an endpoint that checks X-Wacli-Signature (someone pasted this text here before me), build nothing twice: read that it does what is below, enroll me through it (see "A further person"), check with a status request that my read key works, and answer with the same address and my keys. Leave the tests of "Before you say it is done" to whoever built it: you may not be able to remove a test person. An endpoint that cannot enroll, has no read key or does not answer what wacli asks (see "What wacli asks") was built from an older version of this text: bring it up to this one first when you can change it, and otherwise tell me who can.
 
 ## What arrives
 
@@ -113,7 +113,7 @@ These steps are for what wacli posts to the address.
 6. For each entry in removed, in that person's rows only: with moved_to_msg_id, delete the old row (the same message is in messages under its new id). Without it, clear the stored text, display_text, media_caption and filename and mark the row removed. Apply removed after messages. A removed message does not come back in messages. Ignore an entry for a message that was never stored.
 7. It stores each call under person + chat_jid + call_id + event_type and overwrites on repeat: the calls of the last 24 hours come again every round. Only event_type "call_log" has an outcome (connected, missed, rejected, accepted_elsewhere) and a duration; the other types are live signals.
 8. It keeps per key: when it last posted, store_id, linked, last_sync_at, and whether more was false (that computer was caught up at that moment).
-9. It answers 204 only after all of it is stored, in one transaction. Write the %d rows in one statement, not one by one: the first round is the whole history. Any other answer makes wacli send the same request again next round, every round. So a request with the right signature is refused only for what these steps name: a value the database cannot hold (a NUL character, an entry without its ids) is dropped or skipped, never a reason to fail the batch. wacli reads nothing from the answer but the status code.
+9. It answers 204 only after all of it is stored, in one transaction. Write the %d rows in one statement, not one by one: the first round is the whole history. Any other answer makes wacli send the same request again next round, every round. So a request with the right signature is refused only for what these steps name: a value the database cannot hold (a NUL character, an entry without its ids) is dropped or skipped, never a reason to fail the batch. Of this answer wacli reads the status code and nothing else.
 
 The first request wacli sends is a check: empty lists and "more": true. It gets a 2xx like any other.
 
@@ -126,6 +126,15 @@ Reading goes through the same endpoint and through nothing else. How a read requ
 - A status request with the read key answers for that person only: since when they are enrolled, when their wacli last posted and whether it was caught up, when their read key last read and how often on each of the last 30 days, and how many messages and calls are stored. A status request is not counted as a read.
 - The tables stay closed to everything but the endpoint: no other route, no grant and no view reads them, and nothing reads across people.
 - Letting someone else read a person's rows is something only that person asks for, later, in their own chat. Until then it does not exist.
+
+## What wacli asks
+
+wacli shows me on my own computer when my WhatsApp was last read here. For that it posts one more kind of request to the address: signed with my push key like every other, with "status": true in the body, "more": true and three empty lists.
+
+- Check it as steps 1 to 4. Store nothing from it, and count it neither as a post (step 8 stays as it was) nor as a read.
+- Answer 200 with Content-Type application/json and these four fields, for the person of the key: {"last_read_at": "2026-11-17T10:31:00Z", "reads_today": 3, "messages": 1204, "calls": 17}
+- last_read_at is when that person's read key last read, null when it never did. reads_today counts its read requests on the current UTC day. messages and calls count that person's stored rows, a removed message left out.
+- It is the one answer wacli reads, and it takes these four fields from it and nothing else.
 
 ## The keys
 
@@ -165,7 +174,9 @@ Only when this project's backend is Supabase:
 - The address answers when no chat is open: the live address of this project, not a preview that stops. Keep it the same afterwards: wacli keeps its place per address and sends a new address everything again.
 - When this project runs only on my own computer, the address is on that computer and answers while the receiver runs. Add one line to your answer with the command that starts it. While it is off wacli loses nothing: it sends the same again next round.
 - Post signed requests to that address yourself, the way wacli would. The right key gives 2xx and the rows are there; the same request again leaves one row of each; a wrong key gives 401; a body changed after signing gives 401.
-- Enroll two test people and post for each. Each read key returns its own person's rows and none of the other's; the status shows the reads you just made; a wrong read key gives 401; enrolling without the secret gives 401 and enrolling a person who has keys gives 409. Remove your test rows and test people.
+- Enroll two test people and post for each. Each read key returns its own person's rows and none of the other's; the status shows the reads you just made; a wrong read key gives 401; enrolling without the secret gives 401 and enrolling a person who has keys gives 409.
+- A request signed with a test person's push key and "status": true gives 200 with the four fields of "What wacli asks", the reads you just made among them, and when that person last posted is the same before and after it.
+- Remove your test rows and test people.
 
 Then answer with these three lines, the labels as written here whatever language you answer in, and ask me nothing you can decide yourself (the paths and the names are yours):
 

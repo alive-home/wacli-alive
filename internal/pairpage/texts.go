@@ -43,6 +43,20 @@ type text struct {
 	Assistant, AssistantBody string
 	Copy, Copied, Selected   string
 
+	// The page `wacli app` serves adds a panel for the scheduled push. The
+	// Mac app says the same in its Settings (macos/Texts.swift).
+	StartAgain              string
+	SendTitle, SendBody     string
+	Address, Key, NoAddress string
+	CopyPrompt              string
+	TurnOn, Checking        string
+	TurnOff                 string
+	SendsTo, LastRun        string
+	LastRead, OnServer      string
+	// Panel is what the panel's script says: sentences it builds from numbers
+	// and times.
+	Panel map[string]string
+
 	// The prompt: PromptEnd takes the store directory and the command to
 	// pair again.
 	PromptStart, PromptEnd string
@@ -87,6 +101,32 @@ var texts = map[string]text{
 		Copied:        "Gekopieerd",
 		Selected:      "Tekst geselecteerd. Kopieer met Ctrl+C of ⌘C.",
 
+		StartAgain: "Opnieuw starten",
+		SendTitle:  "Stuur een kopie naar een server",
+		SendBody:   "Elke 15 minuten haalt deze computer op wat nieuw is op WhatsApp en stuurt elk bericht en elk belletje naar dit adres. Het stuurt alleen: de server kan deze computer niets vragen.",
+		Address:    "Adres",
+		Key:        "Sleutel",
+		NoAddress:  "Nog geen adres? De AI-agent van je eigen project kan de ontvangende kant bouwen. Kopieer de opdracht en plak hem in de chat: je krijgt het adres en de sleutel terug.",
+		CopyPrompt: "Kopieer opdracht",
+		TurnOn:     "Zet aan",
+		Checking:   "Controleren…",
+		TurnOff:    "Zet uit",
+		SendsTo:    "Stuurt naar",
+		LastRun:    "Laatste ronde",
+		LastRead:   "Laatst gelezen",
+		OnServer:   "Op de server",
+		Panel: map[string]string{
+			"message": "bericht", "messages": "berichten", "call": "belletje", "calls": "belletjes",
+			"firstRun":     "De eerste ronde loopt.",
+			"failed":       "Mislukt",
+			"notScheduled": "Deze computer start het niet meer. Zet het uit en weer aan.",
+			"neverRead":    "Nog niet gelezen",
+			"today":        "keer vandaag",
+			"copied":       "Gekopieerd",
+			"selected":     "Tekst geselecteerd. Kopieer met Ctrl+C of ⌘C.",
+			"closed":       "wacli is gesloten. Open wacli opnieuw om verder te gaan.",
+		},
+
 		PromptStart: "Mijn WhatsApp is op deze computer gekoppeld met wacli. Het kan alleen lezen, niet versturen.\n\nOpdrachten:\n",
 		PromptEnd:   "\nMet --json krijg je uitvoer die je kunt verwerken. De berichten staan in %s.\nNiet meer gekoppeld? Start `%s`; ik scan de code.",
 		Relink:      "auth --open --lang nl",
@@ -127,6 +167,32 @@ var texts = map[string]text{
 		Copy:          "Copy text",
 		Copied:        "Copied",
 		Selected:      "Text selected. Copy with Ctrl+C or ⌘C.",
+
+		StartAgain: "Start again",
+		SendTitle:  "Send a copy to a server",
+		SendBody:   "Every 15 minutes this computer fetches what is new from WhatsApp and posts every message and call to this address. It only sends: the server cannot ask this computer for anything.",
+		Address:    "Address",
+		Key:        "Key",
+		NoAddress:  "No address yet? The AI agent of your own project can build the receiving side. Copy the instructions and paste them in its chat: it answers with the address and the key.",
+		CopyPrompt: "Copy instructions",
+		TurnOn:     "Turn on",
+		Checking:   "Checking…",
+		TurnOff:    "Turn off",
+		SendsTo:    "Sends to",
+		LastRun:    "Last run",
+		LastRead:   "Last read",
+		OnServer:   "On the server",
+		Panel: map[string]string{
+			"message": "message", "messages": "messages", "call": "call", "calls": "calls",
+			"firstRun":     "The first run is under way.",
+			"failed":       "Failed",
+			"notScheduled": "This computer no longer starts it. Turn it off and on again.",
+			"neverRead":    "Not read yet",
+			"today":        "times today",
+			"copied":       "Copied",
+			"selected":     "Text selected. Copy with Ctrl+C or ⌘C.",
+			"closed":       "wacli has closed. Open wacli again to go on.",
+		},
 
 		PromptStart: "My WhatsApp is linked on this computer with wacli. It can only read, not send.\n\nCommands:\n",
 		PromptEnd:   "\nAdd --json for output you can parse. The messages are in %s.\nNo longer linked? Run `%s` and I will scan the code.",

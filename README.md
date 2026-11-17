@@ -36,6 +36,8 @@ Your messages and session keys stay in the store directory on your disk, readabl
 
 **On a Mac:** download [wacli.dmg](https://github.com/alive-home/wacli-alive/releases/latest/download/wacli.dmg), drag wacli to Applications and open it. Its window shows the code to scan with your phone; nothing needs a terminal. See [the Mac app](docs/install.md#mac-app).
 
+**On Windows:** download [wacli.exe](https://github.com/alive-home/wacli-alive/releases/latest/download/wacli.exe) and open it. wacli opens as a page in your browser, with the code to scan. See [Windows](docs/install.md#windows).
+
 **From source,** on any system: build it from this repository. You need Go 1.27.0 or newer and a C compiler.
 
 ```sh
@@ -100,6 +102,7 @@ While `sync --follow` runs it holds the store lock. `media download` and `contac
 | [`sync`](docs/sync.md), [`history`](docs/history.md) | Mirror new events and request older per-chat history. |
 | [`messages`](docs/messages.md), [`calls`](docs/calls.md) | Search, read, and export local records. |
 | [`push`](docs/push.md) | Post stored messages and calls to a URL you choose. |
+| [`app`](docs/app.md) | wacli as a page in your browser: link, turn the push on, see how it goes. |
 | [`media`](docs/media.md) | Download media from synced messages. |
 | [`contacts`](docs/contacts.md), [`chats`](docs/chats.md) | Find people and chats; keep local aliases and tags. |
 | [`groups`](docs/groups.md), [`channels`](docs/channels.md) | Read groups, participants, and channels. |

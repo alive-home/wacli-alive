@@ -4,6 +4,8 @@ Read when: sending the local store to your own server, database, CRM, or agent.
 
 `wacli push` posts what the local store holds to a URL you choose: every message once, then each change, and the call events. It only posts. It reads nothing from a response beyond the status code, so the receiving side cannot ask this computer for anything. It does not send to or change WhatsApp.
 
+The one answer wacli reads is the one a person asks for with `push status --receiver`: four counters the receiver keeps about that person's own messages. See [What the receiver is asked](#what-the-receiver-is-asked).
+
 Without this command (or `sync --webhook`), nothing is posted anywhere.
 
 ## Commands
@@ -11,7 +13,7 @@ Without this command (or `sync --webhook`), nothing is posted anywhere.
 ```bash
 wacli push --url URL [--key-file FILE] [--sync] [--every DURATION] [--dry-run] [--allow-private]
 wacli push install (--url URL [--key-file FILE] | --stdin) [--allow-private]
-wacli push status
+wacli push status [--receiver]
 wacli push uninstall
 wacli push prompt [--lang nl|en]
 ```
@@ -123,7 +125,22 @@ Paste the text into the agent's chat. It describes the request, the signature an
 
 Every stored row belongs to the person of the key it came with, so a team shares one receiver: each further person pastes the same text in the same project, and their agent enrolls them at the endpoint instead of building again. That takes the project's enrollment secret (`WACLI_ENROLL_SECRET`, shared with every agent of the project) and no access to the database, and it only ever makes a new person.
 
+The text also has the endpoint answer [what wacli asks](#what-the-receiver-is-asked), so the Mac app and the app page can show when your messages were last read.
+
 Reading goes through the endpoint too, and a person reads only their own rows. Each person has a read key beside the push key, saved as a secret only that person has (`WACLI_READ_KEY`), and an agent reads with the key of the person it works for. So colleagues in one project do not read each other's WhatsApp. The endpoint keeps when each read key last read, and a status request with the read key shows a person their own: the last post, the last read and the reads per day. Whoever administers the database can still read every row; the agent says who that is. The text also says what holds when the project runs on Supabase (an Edge Function without Supabase's JWT check, tables that stay closed to everything but the function).
+
+### What the receiver is asked
+
+`wacli push status --receiver` posts one more kind of request to the installed URL, signed like every other: the request of the check that `install` sends (`"more": true`, three empty lists) with `"status": true` added. A receiver that knows it stores nothing from it and answers `200` with four fields about the person of the key:
+
+```json
+{ "last_read_at": "2026-11-17T10:31:00Z", "reads_today": 3, "messages": 1204, "calls": 17 }
+```
+
+- `last_read_at` is when that person's read key last read, or `null`. `reads_today` counts its read requests on the current UTC day. `messages` and `calls` count the rows the receiver holds for that person.
+- wacli takes these four fields and nothing else. An answer longer than 4 KB, one that is not JSON, one without all four fields or with a negative count is refused. Each field is a time or a number, so nothing a receiver answers is text this computer shows or acts on.
+- A receiver built before this request answers it like the check, with `204` and no body. `status` then says the receiver gave no status, and everything else it prints is still true.
+- Nothing asks on its own: a scheduled round never does. The [Mac app](install.md#mac-app) and the [app page](app.md) ask while their window is open, about once a minute.
 
 ## Running it on a schedule
 
@@ -139,13 +156,14 @@ wacli push uninstall
 - Then the system starts a round now and every 15 minutes while you are signed in: a launchd agent on macOS (which also starts a round at each sign-in), a task in Task Scheduler on Windows (on battery too, and caught up after sleep). Both belong to the signed-in user and are named `wacli-push-` plus eight characters that stand for the store directory. A round fetches what is new from WhatsApp, as `--sync` does, and pushes. A round that is still going is not started a second time.
 - A push is installed whole or not at all: when the system does not take the job, the saved URL and key are removed again, an earlier install for this store included.
 - The URL and the path of the key file are kept in `scheduled-push.json` in the store directory, owner-only. The scheduled command is `wacli --store DIR push --installed`: the URL is not in it, because a program's arguments are readable by every program on the computer. For the same reason a program that starts `install` can hand both over standard input: `--stdin` reads `{"url": "...", "key": "..."}` and keeps the key beside the settings, as `scheduled-push.key`.
-- `status` names the receiver's host and how the last round ended. `--json` gives `installed`, `scheduled` (the system still holds the job), `host`, `every_seconds` and `last_run`.
+- `status` names the receiver's host and how the last round ended. `--json` gives `installed`, `scheduled` (the system still holds the job), `host`, `every_seconds` and `last_run`. It reaches nothing. With `--receiver` it also [asks the receiver](#what-the-receiver-is-asked) and adds `receiver`, or `receiver_error` when there was no usable answer.
+- A round waits up to ten minutes for another wacli that holds the store, such as the app still fetching the first history when the push was turned on.
 - `uninstall` removes the job, the saved URL and a key that `--stdin` stored. The position stays, so installing again for the same URL sends what is new.
 - One schedule per store directory: a named account (`--account`) or another `--store` gets its own, and `status` and `uninstall` speak for the store they are run with. The job runs the program by the path it was started with: after moving it, run `install` again.
 - On Windows the task runs `wacli.exe`, a console program, so a console window can show for the length of a round.
 - On Linux there is no scheduler to hand it to; start `wacli push --url URL --key-file FILE --sync` from cron or a systemd timer.
 
-The [Mac app](install.md#mac-app) does the same from its Settings window.
+The [Mac app](install.md#mac-app) does the same from its Settings window, and [`wacli app`](app.md) from a page in the browser on any system.
 
 ## Examples
 

@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/openclaw/wacli/internal/lock"
 	"github.com/openclaw/wacli/internal/schedule"
 )
 
@@ -345,5 +346,118 @@ func TestPushPromptPrintsWithoutAStore(t *testing.T) {
 	}
 	if _, err := os.Stat(missing); !os.IsNotExist(err) {
 		t.Fatalf("push prompt made the store directory: %v", err)
+	}
+}
+
+// `status --receiver` asks the receiver of the installed push, signed with the
+// installed key, and a receiver without a status leaves the rest of status true.
+func TestPushStatusAsksTheReceiverOnlyWhenTold(t *testing.T) {
+	useFakeScheduler(t)
+	answer, asked := `{"last_read_at":"2026-11-17T10:31:00Z","reads_today":3,"messages":1204,"calls":17}`, 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		var env struct {
+			Status bool `json:"status"`
+		}
+		_ = json.Unmarshal(body, &env)
+		if !env.Status {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		asked++
+		mac := hmac.New(sha256.New, []byte("a-key"))
+		mac.Write(body)
+		if r.Header.Get("X-Wacli-Signature") != "sha256="+hex.EncodeToString(mac.Sum(nil)) {
+			t.Errorf("the status request is not signed with the installed key")
+		}
+		if answer == "" {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		_, _ = io.WriteString(w, answer)
+	}))
+	t.Cleanup(srv.Close)
+	store := t.TempDir()
+	root := newRootCmd(&rootFlags{})
+	root.SetIn(strings.NewReader(`{"url":"` + srv.URL + `/in/secret-token","key":"a-key"}`))
+	root.SetArgs([]string{"--store", store, "push", "install", "--stdin", "--allow-private"})
+	captureRootStdout(t, func() {
+		if err := root.Execute(); err != nil {
+			t.Fatalf("push install: %v", err)
+		}
+	})
+	status := func(args ...string) string {
+		return captureRootStdout(t, func() {
+			if err := execute(append([]string{"--store", store, "--json", "push", "status"}, args...)); err != nil {
+				t.Fatalf("push status %v: %v", args, err)
+			}
+		})
+	}
+
+	if text := status(); asked != 0 || strings.Contains(text, "receiver") {
+		t.Fatalf("a plain status asked the receiver %d times and printed:\n%s", asked, text)
+	}
+	text := status("--receiver")
+	if asked != 1 || !strings.Contains(text, `"last_read_at":"2026-11-17T10:31:00Z"`) || !strings.Contains(text, `"reads_today":3`) || !strings.Contains(text, `"installed":true`) {
+		t.Fatalf("status --receiver asked %d times and printed:\n%s", asked, text)
+	}
+	answer = ""
+	text = status("--receiver")
+	if !strings.Contains(text, `"receiver_error"`) || strings.Contains(text, `"receiver":`) || !strings.Contains(text, `"installed":true`) || strings.Contains(text, "secret-token") {
+		t.Fatalf("status --receiver against a receiver without a status printed:\n%s", text)
+	}
+
+	if err := execute([]string{"--store", store, "push", "uninstall"}); err != nil {
+		t.Fatal(err)
+	}
+	asked = 0
+	if text := status("--receiver"); asked != 0 || strings.Contains(text, "receiver") {
+		t.Fatalf("with nothing installed status --receiver asked %d times and printed:\n%s", asked, text)
+	}
+}
+
+// The scheduled round waits for a wacli that holds the store, which is the
+// app still fetching the first history when the push was just turned on. It
+// used to report "store is locked" as a failed round for the next 15 minutes.
+func TestScheduledRoundWaitsForTheStore(t *testing.T) {
+	useFakeScheduler(t)
+	rc := newInstallReceiver(t)
+	store := t.TempDir()
+	keyFile := filepath.Join(t.TempDir(), "key")
+	if err := os.WriteFile(keyFile, []byte("a-key\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := execute([]string{"--store", store, "push", "install", "--url", rc.srv.URL, "--key-file", keyFile, "--allow-private"}); err != nil {
+		t.Fatalf("push install: %v", err)
+	}
+
+	held, err := lock.Acquire(store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	released := make(chan struct{})
+	go func() {
+		time.Sleep(300 * time.Millisecond)
+		_ = held.Release()
+		close(released)
+	}()
+	// The store was never paired, so the sync still fails: but on that, not on the lock.
+	err = execute([]string{"--store", store, "push", "--installed"})
+	<-released
+	if err == nil || strings.Contains(err.Error(), "locked") {
+		t.Fatalf("a round started while the store was held: err = %v, want the unpaired store's own failure", err)
+	}
+
+	// A wait that runs out is still reported.
+	held, err = lock.Acquire(store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer held.Release()
+	wait := scheduledLockWait
+	scheduledLockWait = 50 * time.Millisecond
+	defer func() { scheduledLockWait = wait }()
+	if err := execute([]string{"--store", store, "push", "--installed"}); err == nil || !strings.Contains(err.Error(), "locked") {
+		t.Fatalf("a round against a store that stays held: err = %v", err)
 	}
 }

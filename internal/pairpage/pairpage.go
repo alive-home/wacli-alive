@@ -3,9 +3,13 @@
 //
 // The page is two files in the folder pair of the store directory: pair.html,
 // which a browser opens from disk, and pair.js, which the open page loads
-// again every moment to follow the pairing. Nothing is served and the page
-// loads nothing from the network. The folder holds nothing else, so a program
-// that shows the page can be given that folder alone and not the store.
+// again every moment to follow the pairing. The page loads nothing from the
+// network. The folder holds nothing else, so a program that shows the page can
+// be given that folder alone and not the store.
+//
+// `wacli app` shows the same page from an address on this computer instead
+// (Served, Script), with a panel for the scheduled push that talks to that
+// address and to nothing else.
 package pairpage
 
 import (
@@ -146,6 +150,30 @@ func (p *Page) Finish(messages int64, syncErr error) error {
 	return err
 }
 
+// Served is the page as it stands now, for a program that serves it from an
+// address on this computer: with the panel for the scheduled push, in lang.
+func (p *Page) Served(lang string) ([]byte, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return render(p.cur, Language(lang), p.storeDir, p.command, true)
+}
+
+// Script is what the open page loads to follow the pairing: the state as it
+// stands now.
+func (p *Page) Script() ([]byte, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return script(p.cur)
+}
+
+func script(v view) ([]byte, error) {
+	state, err := json.Marshal(v)
+	if err != nil {
+		return nil, err
+	}
+	return []byte("pairState(" + string(state) + ");\n"), nil
+}
+
 func (p *Page) keepAlive() {
 	ticker := time.NewTicker(heartbeat)
 	defer ticker.Stop()
@@ -177,7 +205,7 @@ func (p *Page) set(change func(*view)) error {
 	if err != nil {
 		return err
 	}
-	state, err := json.Marshal(p.cur)
+	state, err := script(p.cur)
 	if err != nil {
 		return err
 	}
@@ -185,7 +213,7 @@ func (p *Page) set(change func(*view)) error {
 		return fmt.Errorf("write pairing page: %w", err)
 	}
 	// The script first: a page that is opened now must find it.
-	if err := fsutil.WritePrivateFileAtomic(filepath.Join(p.storeDir, dirName, jsName), []byte("pairState("+string(state)+");\n")); err != nil {
+	if err := fsutil.WritePrivateFileAtomic(filepath.Join(p.storeDir, dirName, jsName), state); err != nil {
 		return fmt.Errorf("write pairing page: %w", err)
 	}
 	if err := fsutil.WritePrivateFileAtomic(p.Path(), html); err != nil {
@@ -194,9 +222,15 @@ func (p *Page) set(change func(*view)) error {
 	return nil
 }
 
+// renderHTML is the page a browser opens from disk.
 func renderHTML(v view, lang, storeDir, command string) ([]byte, error) {
+	return render(v, lang, storeDir, command, false)
+}
+
+func render(v view, lang, storeDir, command string, served bool) ([]byte, error) {
 	var buf bytes.Buffer
 	err := pageTemplate.Execute(&buf, map[string]any{
+		"Served":   served,
 		"View":     v,
 		"Live":     v.live(),
 		"Lang":     lang,

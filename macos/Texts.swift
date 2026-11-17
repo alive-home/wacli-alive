@@ -15,6 +15,9 @@ struct Texts {
     let sendsTo, lastRun, firstRun, notScheduled: String
     let sent: (_ when: String, _ messages: Int, _ calls: Int) -> String
     let failed: (_ when: String) -> String
+    let lastRead, neverRead, onServer: String
+    let read: (_ when: String, _ today: Int) -> String
+    let holds: (_ messages: Int, _ calls: Int) -> String
 }
 
 let texts: Texts = Locale.preferredLanguages.first?.hasPrefix("nl") == true ? .dutch : .english
@@ -43,7 +46,12 @@ extension Texts {
         firstRun: "The first run is under way.",
         notScheduled: "macOS no longer starts it. Turn it off and on again.",
         sent: { when, messages, calls in "\(when): \(messages) \(messages == 1 ? "message" : "messages"), \(calls) \(calls == 1 ? "call" : "calls")" },
-        failed: { when in "Failed \(when)" }
+        failed: { when in "Failed \(when)" },
+        lastRead: "Last read",
+        neverRead: "Not read yet",
+        onServer: "On the server",
+        read: { when, today in "\(when), \(today) \(today == 1 ? "time" : "times") today" },
+        holds: { messages, calls in "\(messages) \(messages == 1 ? "message" : "messages"), \(calls) \(calls == 1 ? "call" : "calls")" }
     )
 
     static let dutch = Texts(
@@ -69,6 +77,11 @@ extension Texts {
         firstRun: "De eerste ronde loopt.",
         notScheduled: "macOS start het niet meer. Zet het uit en weer aan.",
         sent: { when, messages, calls in "\(when): \(messages) \(messages == 1 ? "bericht" : "berichten"), \(calls) \(calls == 1 ? "belletje" : "belletjes")" },
-        failed: { when in "Mislukt \(when)" }
+        failed: { when in "Mislukt \(when)" },
+        lastRead: "Laatst gelezen",
+        neverRead: "Nog niet gelezen",
+        onServer: "Op de server",
+        read: { when, today in "\(when), \(today) keer vandaag" },
+        holds: { messages, calls in "\(messages) \(messages == 1 ? "bericht" : "berichten"), \(calls) \(calls == 1 ? "belletje" : "belletjes")" }
     )
 }

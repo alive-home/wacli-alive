@@ -1,11 +1,11 @@
 ---
 title: Install
-description: "Install the read-only wacli: the Mac app, or a build from source."
+description: "Install the read-only wacli: the Mac app, the program for Windows, or a build from source."
 ---
 
 # Install
 
-This read-only build of `wacli` comes as an app for the Mac, and as source to build on any system. There is no Homebrew formula for it.
+This read-only build of `wacli` comes as an app for the Mac, as one program for Windows, and as source to build on any system. There is no Homebrew formula for it.
 
 Do not install `wacli` with Homebrew, `go install`, or the release archives of openclaw/wacli. Those are the upstream build, which can send.
 
@@ -14,7 +14,7 @@ Do not install `wacli` with Homebrew, `go install`, or the release archives of o
 Download [wacli.dmg](https://github.com/alive-home/wacli-alive/releases/latest/download/wacli.dmg), open it, drag wacli to Applications, and open it from there. It runs on macOS 13 or newer, on Apple Silicon and Intel Macs. The app is signed with a Developer ID and notarized by Apple, so macOS opens it after its usual one-time question about an app from the internet.
 
 - **The window links WhatsApp.** It shows the code to scan with your phone, then that WhatsApp is linked and how many messages came in. It is the [pairing page](auth.md#pairing-page) of `wacli auth`, in English or Dutch after the Mac's language. Opening the app again later fetches what is new.
-- **Settings (⌘,) can send a copy to a server.** Fill in the address and the key of your receiver and turn it on: the app checks that the receiver takes them, then the Mac pushes every 15 minutes. It is [`push install`](push.md#running-it-on-a-schedule); Settings shows how the last run ended. Off by default.
+- **Settings (⌘,) can send a copy to a server.** Fill in the address and the key of your receiver and turn it on: the app checks that the receiver takes them, then the Mac pushes every 15 minutes. It is [`push install`](push.md#running-it-on-a-schedule); Settings shows how the last run ended, and when the receiver last read your messages when the receiver [says so](push.md#what-the-receiver-is-asked). Off by default.
 - **No receiver yet?** "Copy instructions" in Settings puts a text on the clipboard for the AI agent of your own project. Paste it in the agent's chat: it builds the receiver there and answers with the address and the key. It is [`push prompt`](push.md#having-an-agent-build-it).
 - **The program is inside the app,** at `/Applications/wacli.app/Contents/Helpers/wacli`. The text for your AI assistant on the pairing page names it by that path. To type `wacli` in a terminal, link it into a directory on your `PATH`:
 
@@ -26,6 +26,19 @@ ln -s /Applications/wacli.app/Contents/Helpers/wacli ~/.local/bin/wacli
 The app never checks for updates. To update, download the disk image again and replace the app; the store and the link with your phone stay. To remove it: turn off sending in Settings, delete the app, delete the store directory (`~/.alive-wapp`), and log the device out in WhatsApp on your phone, under Linked devices.
 
 To build the app yourself: `bun run pack:mac -- --dev` makes `dist/mac/wacli.app`, signed for your Mac alone (it needs Xcode besides the tools below). Without `--dev` the script signs with the Developer ID named in `scripts/pack-mac.mjs`, has Apple notarize the app, and builds `dist/mac/wacli.dmg`.
+
+## Windows
+
+Download [wacli.exe](https://github.com/alive-home/wacli-alive/releases/latest/download/wacli.exe) and open it. It is one program for 64-bit Windows, with no installer.
+
+- **Windows asks once whether to run it.** The program is not signed for Windows, so SmartScreen shows "Windows protected your PC": choose "More info", then "Run anyway".
+- **Opening it shows wacli in your browser.** It is [`wacli app`](app.md): the page links WhatsApp, turns the push to your server on and off, and shows how it goes. A window with text stays open beside it while you use the page; closing that window stops wacli, and a push that is turned on keeps running.
+- **It keeps itself.** Opened from your downloads, wacli puts a copy in `%LOCALAPPDATA%\wacli\wacli.exe` and runs from there, so the download can go. The scheduled push names that copy. To update, download the new `wacli.exe` and open it; the store and the link with your phone stay.
+- **In a terminal** the same file is the command line: `%LOCALAPPDATA%\wacli\wacli.exe --help`. Started from a terminal it copies nothing.
+
+It never checks for updates. To remove it: turn off sending on the page, delete the folder `%LOCALAPPDATA%\wacli` and the store directory (`%USERPROFILE%\.alive-wapp`), and log the device out in WhatsApp on your phone, under Linked devices.
+
+Built by hand on a Windows runner and attached to the release; pairing with a phone has not been tried on Windows.
 
 ## Build from source
 

@@ -34,6 +34,8 @@ type authOptions struct {
 	historyPerChat int
 	fullHistory    bool
 	historySizeMB  int
+	// page is a pairing page its caller made and shows itself (`wacli app`).
+	page *pairpage.Page
 }
 
 type validatedAuthOptions struct {
@@ -127,10 +129,13 @@ func runAuth(flags *rootFlags, opts authOptions) (res appPkg.SyncResult, err err
 	}
 	onQRCode := authQRWriter(validated.qrFormat, os.Stdout, os.Stderr, a.Events())
 	var onConnected func()
-	if opts.openPage || opts.pageOnly {
-		page, pageErr := openPairPage(flags, a, opts, os.Stderr)
-		if pageErr != nil {
-			return appPkg.SyncResult{}, pageErr
+	if opts.openPage || opts.pageOnly || opts.page != nil {
+		page := opts.page
+		if page == nil {
+			var pageErr error
+			if page, pageErr = openPairPage(flags, a, opts, os.Stderr); pageErr != nil {
+				return appPkg.SyncResult{}, pageErr
+			}
 		}
 		onQRCode = pairPageQRWriter(page, os.Stderr, a.Events())
 		onConnected = func() {

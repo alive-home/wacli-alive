@@ -91,6 +91,7 @@ type envelope struct {
 	Linked       bool              `json:"linked"`
 	LastSyncAt   *time.Time        `json:"last_sync_at"`
 	More         bool              `json:"more"`
+	Status       bool              `json:"status,omitempty"`
 	Messages     []json.RawMessage `json:"messages"`
 	Removed      []json.RawMessage `json:"removed"`
 	Calls        []json.RawMessage `json:"calls"`
@@ -206,17 +207,24 @@ func (p *poster) newEnvelope() envelope {
 	}
 }
 
-// post sends one request. sent_at is the moment it leaves: the receiver
-// refuses a request that is minutes old.
+// post sends one request and reads nothing from the answer but its status.
 func (p *poster) post(ctx context.Context, env envelope) error {
+	_, err := p.send(ctx, env, 0)
+	return err
+}
+
+// send sends one request and returns at most keep bytes of a 2xx answer.
+// sent_at is the moment it leaves: the receiver refuses a request that is
+// minutes old.
+func (p *poster) send(ctx context.Context, env envelope, keep int64) (answer, error) {
 	env.SentAt = time.Now().UTC().Truncate(time.Second)
 	body, err := json.Marshal(env)
 	if err != nil {
-		return err
+		return answer{}, err
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, p.url, bytes.NewReader(body))
 	if err != nil {
-		return fmt.Errorf("push: create request: invalid URL")
+		return answer{}, fmt.Errorf("push: create request: invalid URL")
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("User-Agent", "wacli/"+p.version)
@@ -232,14 +240,22 @@ func (p *poster) post(ctx context.Context, env envelope) error {
 		if errors.As(err, &withURL) {
 			err = withURL.Err
 		}
-		return fmt.Errorf("push: request to %s failed: %w", req.URL.Host, err)
+		return answer{}, fmt.Errorf("push: request to %s failed: %w", req.URL.Host, err)
 	}
 	defer resp.Body.Close()
+	// One byte more than is kept tells an answer that is too long.
+	kept, _ := io.ReadAll(io.LimitReader(resp.Body, keep+1))
 	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<20))
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("push: %s answered %d", req.URL.Host, resp.StatusCode)
+		return answer{}, fmt.Errorf("push: %s answered %d", req.URL.Host, resp.StatusCode)
 	}
-	return nil
+	return answer{status: resp.StatusCode, body: kept, host: req.URL.Host}, nil
+}
+
+type answer struct {
+	status int
+	body   []byte
+	host   string
 }
 
 // keyID tells the receiver which key signed a request without showing the

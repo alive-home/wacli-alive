@@ -30,6 +30,9 @@ type rootFlags struct {
 }
 
 func execute(args []string) error {
+	// A double click on Windows opens the app page (see openedArgs); cobra's
+	// own answer to it is a notice that this is a command-line tool.
+	cobra.MousetrapHelpText = ""
 	var flags rootFlags
 	rootCmd := newRootCmd(&flags)
 	rootCmd.SetArgs(args)
@@ -67,6 +70,7 @@ func newRootCmd(flags *rootFlags) *cobra.Command {
 	rootCmd.AddCommand(newAccountsCmd(flags))
 	rootCmd.AddCommand(newDoctorCmd(flags))
 	rootCmd.AddCommand(newAuthCmd(flags))
+	rootCmd.AddCommand(newAppCmd(flags))
 	rootCmd.AddCommand(newSyncCmd(flags))
 	rootCmd.AddCommand(newMessagesCmd(flags))
 	rootCmd.AddCommand(newCallsCmd(flags))
