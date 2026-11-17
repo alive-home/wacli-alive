@@ -15,6 +15,7 @@ Download [wacli.dmg](https://github.com/alive-home/wacli-alive/releases/latest/d
 
 - **The window links WhatsApp.** It shows the code to scan with your phone, then that WhatsApp is linked and how many messages came in. It is the [pairing page](auth.md#pairing-page) of `wacli auth`, in English or Dutch after the Mac's language. Opening the app again later fetches what is new.
 - **Settings (⌘,) can send a copy to a server.** Fill in the address and the key of your receiver and turn it on: the app checks that the receiver takes them, then the Mac pushes every 15 minutes. It is [`push install`](push.md#running-it-on-a-schedule); Settings shows how the last run ended. Off by default.
+- **No receiver yet?** "Copy instructions" in Settings puts a text on the clipboard for the AI agent of your own project. Paste it in the agent's chat: it builds the receiver there and answers with the address and the key. It is [`push prompt`](push.md#having-an-agent-build-it).
 - **The program is inside the app,** at `/Applications/wacli.app/Contents/Helpers/wacli`. The text for your AI assistant on the pairing page names it by that path. To type `wacli` in a terminal, link it into a directory on your `PATH`:
 
 ```bash

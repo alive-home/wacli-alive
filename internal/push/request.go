@@ -10,9 +10,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"runtime"
+	"strings"
+	"syscall"
 	"time"
 
 	"github.com/openclaw/wacli/internal/safehttp"
@@ -108,21 +111,45 @@ func newPoster(opts Options) (*poster, error) {
 	if err != nil || u.Host == "" {
 		return nil, fmt.Errorf("push: invalid URL")
 	}
-	if u.Scheme != "https" && !(opts.AllowPrivate && u.Scheme == "http") {
-		return nil, fmt.Errorf("push: the URL must use https (http only with --allow-private)")
+	// A receiver on this computer needs neither https nor the flag: nothing
+	// crosses a network.
+	local := thisComputer(u.Hostname())
+	if u.Scheme != "https" && !(u.Scheme == "http" && (opts.AllowPrivate || local)) {
+		return nil, fmt.Errorf("push: the URL must use https (http only for a receiver on this computer, or with --allow-private)")
 	}
 	client := safehttp.NewClient()
-	if opts.AllowPrivate {
+	if opts.AllowPrivate || local {
 		// As above, the content goes where the URL says and nowhere else:
 		// a proxy from the environment is not used.
 		transport := http.DefaultTransport.(*http.Transport).Clone()
 		transport.Proxy = nil
+		if !opts.AllowPrivate {
+			transport.DialContext = (&net.Dialer{Timeout: 10 * time.Second, Control: onlyThisComputer}).DialContext
+		}
 		client = &http.Client{Transport: transport}
 	}
 	client.Timeout = 30 * time.Second
 	// A redirect is never followed: the content goes to the configured host only.
 	client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 	return &poster{client: client, url: opts.URL, key: opts.Key, version: opts.Version, linked: opts.Linked}, nil
+}
+
+// thisComputer reports whether host names this computer itself.
+func thisComputer(host string) bool {
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
+}
+
+// onlyThisComputer refuses a connection that leaves this computer, for a name
+// like localhost that resolves somewhere else.
+func onlyThisComputer(_, address string, _ syscall.RawConn) error {
+	if host, _, err := net.SplitHostPort(address); err != nil || !thisComputer(host) {
+		return fmt.Errorf("the address does not resolve to this computer")
+	}
+	return nil
 }
 
 // requests splits a batch into requests of at most maxItems items and about

@@ -24,6 +24,11 @@ struct PushStatus: Decodable, Equatable {
     }
 }
 
+/// What `wacli push prompt --json` prints.
+private struct ReceiverPrompt: Decodable {
+    let prompt: String
+}
+
 /// Settings: the scheduled push. Off, it asks for the address and the key;
 /// on, it says where the copy goes and how the last run ended.
 struct SettingsView: View {
@@ -35,6 +40,7 @@ struct SettingsView: View {
     /// Counts the changes made here, so a status read that started before
     /// one cannot put the old state back.
     @State private var changes = 0
+    @State private var copied = false
 
     var body: some View {
         Form {
@@ -61,6 +67,11 @@ struct SettingsView: View {
                     Text(texts.sendBody)
                         .foregroundStyle(.secondary)
                         .frame(maxWidth: .infinity, alignment: .leading)
+                    if status?.installed == false {
+                        Text(texts.noAddress)
+                            .foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
                     if let failure {
                         Text(failure)
                             .foregroundStyle(.red)
@@ -68,6 +79,10 @@ struct SettingsView: View {
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }
                     HStack(spacing: 8) {
+                        if status?.installed == false {
+                            Button(copied ? texts.copied : texts.copyPrompt) { copyPrompt() }
+                                .accessibilityIdentifier("push-prompt")
+                        }
                         Spacer()
                         if working { ProgressView().controlSize(.small) }
                         if let status, status.installed {
@@ -131,6 +146,25 @@ struct SettingsView: View {
         let input = ["url": address.trimmingCharacters(in: .whitespaces), "key": key]
         guard let json = try? JSONEncoder().encode(input) else { return }
         change(["push", "install", "--stdin"], input: String(decoding: json, as: UTF8.self))
+    }
+
+    /// Puts the text for the agent that builds the receiver on the clipboard.
+    /// wacli holds the text, so the app and the terminal give the same one.
+    private func copyPrompt() {
+        Task {
+            do {
+                let text = try await Wacli.json(ReceiverPrompt.self, ["push", "prompt", "--lang", texts.language])
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(text.prompt, forType: .string)
+                copied = true
+                try? await Task.sleep(for: .seconds(2))
+                copied = false
+            } catch let error as Wacli.Failure {
+                failure = error.message
+            } catch {
+                failure = error.localizedDescription
+            }
+        }
     }
 
     private func change(_ arguments: [String], input: String? = nil) {

@@ -97,12 +97,12 @@ func newPushCmd(flags *rootFlags) *cobra.Command {
 	}
 	cmd.Flags().StringVar(&p.url, "url", "", "URL to POST to (https)")
 	cmd.Flags().StringVar(&p.keyFile, "key-file", "", "file holding the key that signs each request (X-Wacli-Signature)")
-	cmd.Flags().BoolVar(&p.allowPrivate, "allow-private", false, "allow http and URLs that resolve to localhost or private networks")
+	cmd.Flags().BoolVar(&p.allowPrivate, "allow-private", false, "allow http and URLs that resolve to a private network (a receiver on this computer needs no flag)")
 	cmd.Flags().BoolVar(&p.dryRun, "dry-run", false, "count what would be posted; post nothing and keep the position")
 	cmd.Flags().BoolVar(&p.sync, "sync", false, "fetch what is new from WhatsApp first (as sync --once)")
 	cmd.Flags().DurationVar(&p.every, "every", 0, "keep running and repeat after this long, e.g. 15m")
 	cmd.Flags().BoolVar(&p.installed, "installed", false, "one round with what `push install` saved, after a sync; what the schedule runs")
-	cmd.AddCommand(newPushInstallCmd(flags), newPushUninstallCmd(flags), newPushStatusCmd(flags))
+	cmd.AddCommand(newPushInstallCmd(flags), newPushUninstallCmd(flags), newPushStatusCmd(flags), newPushPromptCmd(flags))
 	return cmd
 }
 

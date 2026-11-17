@@ -434,7 +434,7 @@ func TestDryRunPostsNothingAndKeepsNoPlace(t *testing.T) {
 	}
 }
 
-func TestRedirectIsNotFollowedAndPlainHTTPNeedsAllowPrivate(t *testing.T) {
+func TestRedirectIsNotFollowed(t *testing.T) {
 	f := newFixture(t)
 	elsewhere := newReceiver(t)
 	redirect := httptest.NewServer(http.RedirectHandler(elsewhere.srv.URL, http.StatusTemporaryRedirect))
@@ -447,10 +447,65 @@ func TestRedirectIsNotFollowedAndPlainHTTPNeedsAllowPrivate(t *testing.T) {
 	if got := elsewhere.take(); len(got) != 0 {
 		t.Fatalf("%d requests followed the redirect", len(got))
 	}
+}
 
+func TestPlainHTTPOnlyReachesThisComputerWithoutAllowPrivate(t *testing.T) {
+	f := newFixture(t)
+	f.message("a", "one")
 	f.opts.AllowPrivate = false
-	if _, err := Run(context.Background(), f.db, f.opts); err == nil || !strings.Contains(err.Error(), "https") {
-		t.Fatalf("http without --allow-private: err = %v", err)
+
+	// The fixture's receiver listens on 127.0.0.1.
+	if _, err := Run(context.Background(), f.db, f.opts); err != nil {
+		t.Fatalf("Run to a receiver on this computer: %v", err)
+	}
+	if got := messageIDs(f.rc.take()); !slices.Equal(got, []string{"a"}) {
+		t.Fatalf("the receiver on this computer got %v, want [a]", got)
+	}
+
+	for _, elsewhere := range []string{"http://example.com/in", "http://192.168.1.10/in", "http://localhost.example.com/in"} {
+		f.opts.URL = elsewhere
+		if _, err := Run(context.Background(), f.db, f.opts); err == nil || !strings.Contains(err.Error(), "https") {
+			t.Fatalf("%s without --allow-private: err = %v", elsewhere, err)
+		}
+	}
+}
+
+func TestANameThatLeavesThisComputerIsNotDialled(t *testing.T) {
+	for address, want := range map[string]bool{"127.0.0.1:80": true, "[::1]:80": true, "192.168.1.10:80": false, "93.184.216.34:80": false} {
+		if err := onlyThisComputer("tcp", address, nil); (err == nil) != want {
+			t.Errorf("onlyThisComputer(%s) = %v, want allowed %v", address, err, want)
+		}
+	}
+}
+
+func TestReceiverPromptNamesWhatIsPosted(t *testing.T) {
+	prompt := ReceiverPrompt("Dutch")
+	// Every field of a posted message, removal and call, by the name it is sent under.
+	for _, v := range []any{Message{}, Removed{}, store.CallEvent{}} {
+		raw, err := json.Marshal(v)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var sent map[string]any
+		if err := json.Unmarshal(raw, &sent); err != nil {
+			t.Fatal(err)
+		}
+		for name := range sent {
+			if !strings.Contains(prompt, name) {
+				t.Errorf("the prompt does not name %q, which every %T carries", name, v)
+			}
+		}
+	}
+	for _, want := range []string{"X-Wacli-Key-Id", "X-Wacli-Signature", `"schema": 1`, "at most 200 items", "256 KB", "Answer me in Dutch."} {
+		if !strings.Contains(prompt, want) {
+			t.Errorf("the prompt misses %q", want)
+		}
+	}
+	if strings.Contains(prompt, "%!") {
+		t.Errorf("the prompt has a formatting fault:\n%s", prompt)
+	}
+	if strings.Contains(ReceiverPrompt(""), "Answer me in") {
+		t.Error("without a language the prompt still names one")
 	}
 }
 

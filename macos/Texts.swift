@@ -10,6 +10,7 @@ struct Texts {
 
     let sendTitle, sendBody: String
     let address, key: String
+    let noAddress, copyPrompt, copied: String
     let turnOn, checking, turnOff: String
     let sendsTo, lastRun, firstRun, notScheduled: String
     let sent: (_ when: String, _ messages: Int, _ calls: Int) -> String
@@ -31,6 +32,9 @@ extension Texts {
         sendBody: "Every 15 minutes this Mac fetches what is new from WhatsApp and posts every message and call to this address. It only sends: the server cannot ask this Mac for anything.",
         address: "Address",
         key: "Key",
+        noAddress: "No address yet? The AI agent of your own project can build the receiving side. Copy the instructions and paste them in its chat: it answers with the address and the key.",
+        copyPrompt: "Copy instructions",
+        copied: "Copied",
         turnOn: "Turn on",
         checking: "Checking…",
         turnOff: "Turn off",
@@ -54,6 +58,9 @@ extension Texts {
         sendBody: "Elke 15 minuten haalt deze Mac op wat nieuw is op WhatsApp en stuurt elk bericht en elk belletje naar dit adres. Het stuurt alleen: de server kan deze Mac niets vragen.",
         address: "Adres",
         key: "Sleutel",
+        noAddress: "Nog geen adres? De AI-agent van je eigen project kan de ontvangende kant bouwen. Kopieer de opdracht en plak hem in de chat: je krijgt het adres en de sleutel terug.",
+        copyPrompt: "Kopieer opdracht",
+        copied: "Gekopieerd",
         turnOn: "Zet aan",
         checking: "Controleren…",
         turnOff: "Zet uit",

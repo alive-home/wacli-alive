@@ -332,3 +332,18 @@ func TestPushInstallInstallsNothingWhenTheReceiverRefuses(t *testing.T) {
 		t.Fatalf("jobs = %v, settings file: %v", fake.jobs, statErr)
 	}
 }
+
+func TestPushPromptPrintsWithoutAStore(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "never-made")
+	text := captureRootStdout(t, func() {
+		if err := execute([]string{"--store", missing, "push", "prompt", "--lang", "nl"}); err != nil {
+			t.Fatalf("push prompt: %v", err)
+		}
+	})
+	if !strings.Contains(text, "X-Wacli-Signature") || !strings.Contains(text, "Answer me in Dutch.") {
+		t.Fatalf("push prompt printed:\n%s", text)
+	}
+	if _, err := os.Stat(missing); !os.IsNotExist(err) {
+		t.Fatalf("push prompt made the store directory: %v", err)
+	}
+}

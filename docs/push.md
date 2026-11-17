@@ -13,15 +13,17 @@ wacli push --url URL [--key-file FILE] [--sync] [--every DURATION] [--dry-run] [
 wacli push install (--url URL [--key-file FILE] | --stdin) [--allow-private]
 wacli push status
 wacli push uninstall
+wacli push prompt [--lang nl|en]
 ```
 
-- `--url URL` is where each request goes. It must be `https`. A redirect is never followed.
+- `--url URL` is where each request goes. It must be `https`; a receiver on this computer (`http://localhost:8787/`, `http://127.0.0.1:8787/`) may use `http`. A redirect is never followed.
 - `--key-file FILE` holds the key that signs each request. See [Signing](#signing).
 - `--sync` fetches what is new from WhatsApp first, as `sync --once` does, and closes that connection before anything is posted. When the sync fails, what is stored is still posted and the command exits with the sync's error.
 - `--every DURATION` keeps running and repeats, at least `1m`. A failed round keeps its place and the next round sends it again.
 - `--dry-run` counts what would be posted. It posts nothing and keeps no position.
-- `--allow-private` allows `http` and URLs that resolve to localhost or a private network, for a receiver on your own machine or tailnet.
+- `--allow-private` allows `http` and URLs that resolve to a private network, for a receiver on your own network or tailnet.
 - `push install`, `push status` and `push uninstall` have the system run it every 15 minutes. See [Running it on a schedule](#running-it-on-a-schedule).
+- `push prompt` prints the instructions for an AI agent that builds the receiver. See [Having an agent build it](#having-an-agent-build-it).
 
 ## What a run does
 
@@ -106,8 +108,20 @@ Any string works as a key; `openssl rand -hex 32` makes a good one. Keep the fil
 ```bash
 openssl rand -hex 32 > push.key
 bun scripts/push-receiver-example.mjs --key-file push.key
-wacli push --url http://127.0.0.1:8787/ --key-file push.key --allow-private
+wacli push --url http://127.0.0.1:8787/ --key-file push.key
 ```
+
+### Having an agent build it
+
+When the store should end up in a project of your own that an AI agent works on, let that agent build the receiver:
+
+```bash
+wacli push prompt | pbcopy
+```
+
+Paste the text into the agent's chat. It describes the request, the signature and the rules of this page, and asks the agent to build the endpoint, make a key, test with signed requests of its own, and answer with two lines: the address and the key. Those are what `push install` asks for. `--lang nl` has the agent answer in Dutch; `--json` gives the text as `prompt`. The command opens no store and reaches nothing.
+
+For a team, say so in the same chat: the prompt then has the agent make a key per person.
 
 ## Running it on a schedule
 

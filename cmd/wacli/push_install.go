@@ -127,7 +127,7 @@ func newPushInstallCmd(flags *rootFlags) *cobra.Command {
 	cmd.Flags().StringVar(&s.URL, "url", "", "URL to POST to (https)")
 	cmd.Flags().StringVar(&s.KeyFile, "key-file", "", "file holding the key that signs each request (X-Wacli-Signature)")
 	cmd.Flags().BoolVar(&fromStdin, "stdin", false, `read the URL and the key from standard input as {"url": "...", "key": "..."}; the key is kept in the store directory`)
-	cmd.Flags().BoolVar(&s.AllowPrivate, "allow-private", false, "allow http and URLs that resolve to localhost or private networks")
+	cmd.Flags().BoolVar(&s.AllowPrivate, "allow-private", false, "allow http and URLs that resolve to a private network (a receiver on this computer needs no flag)")
 	return cmd
 }
 

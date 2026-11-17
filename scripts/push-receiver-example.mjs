@@ -4,7 +4,7 @@
 // "storage" are the part a real receiver replaces with its own database.
 //
 //   bun scripts/push-receiver-example.mjs --key-file KEYFILE [--port 8787]
-//   wacli push --url http://127.0.0.1:8787/ --key-file KEYFILE --allow-private
+//   wacli push --url http://127.0.0.1:8787/ --key-file KEYFILE
 //
 // It prints counts only, never what a message says.
 import { createHash, createHmac, timingSafeEqual } from "node:crypto";
