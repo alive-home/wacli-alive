@@ -88,6 +88,8 @@ type App struct {
 	wa                      WAClient
 	sessionState            *sessionObservation
 	sessionHandler          uint32
+	backlogHandler          uint32
+	backlogKept             bool
 	connectGate             chan struct{}
 	sessionResolver         *readOnlySessionResolver
 	db                      *store.DB
@@ -196,6 +198,7 @@ func (a *App) Close() {
 		if sessionState != nil {
 			waClient.RemoveEventHandler(sessionHandler)
 		}
+		a.dropBacklogKeeper()
 	}
 	// A completed command frontier may hand later ready tasks to a background
 	// drainer. Keep SQLite open until that drainer has finished every write.
@@ -281,6 +284,7 @@ func (a *App) Connect(ctx context.Context, allowQR bool, qrWriter func(string)) 
 	if err := a.OpenWA(); err != nil {
 		return err
 	}
+	a.keepBacklog(ctx)
 	select {
 	case <-ctx.Done():
 		return ctx.Err()
